@@ -1,0 +1,20 @@
+{
+    "name": "google-drive",
+    "id": "google-drive",
+    "version": "1.0.0",
+    "description": "Google Drive Integration — backup and restore Prometheus memory, databases, and config",
+    "tools": {
+        "drive_backup": {
+            "path": "bridge.js",
+            "function": "drive_backup",
+            "description": "Backup local system data (history, DBs, .env) to Google Drive",
+            "parameters": {}
+        },
+        "drive_restore": {
+            "path": "bridge.js",
+            "function": "drive_restore",
+            "description": "Restore system data from Google Drive to local machine",
+            "parameters": {}
+        }
+    }
+}

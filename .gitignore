@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Local Data (Memory and Databases)
+history.json
+*.db
+*.sqlite
+
+# Secrets and Configuration
+.env
+token.json
+credentials.json
+
+# OS files
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Other temporary files
+.prometheus/
+tmp/

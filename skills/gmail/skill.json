@@ -1,0 +1,36 @@
+{
+    "name": "gmail",
+    "id": "gmail",
+    "version": "1.0.0",
+    "description": "Private Gmail Agent — scan inbox, compose/send emails with trust verification",
+    "tools": {
+        "gmail_scan": {
+            "path": "bridge.js",
+            "function": "gmail_scan",
+            "description": "Scan unread emails and summarize them using local AI",
+            "parameters": {}
+        },
+        "gmail_compose": {
+            "path": "bridge.js",
+            "function": "gmail_compose",
+            "description": "Draft or send an email. Auto-sends if contact has phone number, otherwise drafts.",
+            "parameters": {
+                "to": {
+                    "type": "string",
+                    "description": "Recipient email",
+                    "required": true
+                },
+                "subject": {
+                    "type": "string",
+                    "description": "Email subject",
+                    "required": true
+                },
+                "body": {
+                    "type": "string",
+                    "description": "Email body",
+                    "required": true
+                }
+            }
+        }
+    }
+}

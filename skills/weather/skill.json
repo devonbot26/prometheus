@@ -1,0 +1,16 @@
+{
+    "name": "weather",
+    "description": "Get current weather for any city (NO API KEY required)",
+    "tools": {
+        "get_weather": {
+            "description": "Get current weather condition and temperature",
+            "parameters": {
+                "location": {
+                    "type": "string",
+                    "description": "City name (e.g. 'New York', 'London')",
+                    "required": true
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,20 @@
+{
+    "name": "web-search",
+    "id": "web-search",
+    "version": "1.0.0",
+    "description": "Web search and scraping agent using DuckDuckGo",
+    "tools": {
+        "web_search": {
+            "path": "bridge.js",
+            "function": "web_search",
+            "description": "Search the web for information using DuckDuckGo",
+            "parameters": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query",
+                    "required": true
+                }
+            }
+        }
+    }
+}
