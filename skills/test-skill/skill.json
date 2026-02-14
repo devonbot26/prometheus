@@ -1,0 +1,18 @@
+{
+    "name": "test-skill",
+    "id": "test-skill",
+    "version": "1.0.0",
+    "description": "A temporary skill for testing self-coding capabilities.",
+    "toolNames": [
+        "test_func"
+    ],
+    "meta": {
+        "tools": {
+            "test_func": {
+                "function": "test_func",
+                "description": "Returns hello message",
+                "parameters": {}
+            }
+        }
+    }
+}

@@ -1,0 +1,35 @@
+{
+    "name": "self-coder",
+    "id": "self-coder",
+    "version": "1.0.0",
+    "description": "Allows Prometheus to write code and create new capabilities for itself.",
+    "tools": {
+        "create_draft_skill": {
+            "path": "index.js",
+            "function": "create_draft_skill",
+            "description": "Write code for a new skill. Saves it to a staging area for review.",
+            "parameters": {
+                "name": {
+                    "type": "string",
+                    "description": "Name of the skill",
+                    "required": true
+                },
+                "description": "What the skill does",
+                "code_js": "The JavaScript code for the skill (ESM format)",
+                "tool_spec": "The JSON object describing the tool for skill.json"
+            }
+        },
+        "install_skill": {
+            "path": "index.js",
+            "function": "install_skill",
+            "description": "Install a drafted skill to the active skills directory.",
+            "parameters": {
+                "name": {
+                    "type": "string",
+                    "description": "Name of the skill to install",
+                    "required": true
+                }
+            }
+        }
+    }
+}

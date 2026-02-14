@@ -1,0 +1,36 @@
+{
+    "name": "knowledge-base",
+    "id": "knowledge-base",
+    "version": "1.0.0",
+    "description": "Local Retrieval-Augmented Generation (RAG) memory. Stores and retrieves knowledge using vector search.",
+    "tools": {
+        "save_knowledge": {
+            "path": "index.js",
+            "function": "save_knowledge",
+            "description": "Save a fact, note, or memory to the vector database for long-term recall. Supports [[Topic]] linking.",
+            "parameters": {
+                "text": {
+                    "type": "string",
+                    "description": "The content to save",
+                    "required": true
+                },
+                "topic": {
+                    "type": "string",
+                    "description": "Optional category or main topic name"
+                }
+            }
+        },
+        "query_knowledge": {
+            "path": "index.js",
+            "function": "query_knowledge",
+            "description": "Search the knowledge base for information about a topic or question.",
+            "parameters": {
+                "query": {
+                    "type": "string",
+                    "description": "The question or topic to search for",
+                    "required": true
+                }
+            }
+        }
+    }
+}

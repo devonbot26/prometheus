@@ -1,0 +1,32 @@
+{
+    "name": "sys-admin",
+    "id": "sys-admin",
+    "version": "1.0.0",
+    "description": "System Administration skill for Prometheus. Manages codebase updates (Git) and full system backups.",
+    "tools": {
+        "git_sync": {
+            "path": "index.js",
+            "function": "git_sync",
+            "description": "Commit local changes and push to GitHub.",
+            "parameters": {
+                "message": {
+                    "type": "string",
+                    "description": "Commit message describing the changes",
+                    "required": true
+                }
+            }
+        },
+        "full_system_backup": {
+            "path": "index.js",
+            "function": "full_system_backup",
+            "description": "Perform a complete system backup: syncs code to GitHub and uploads memory/databases to Google Drive.",
+            "parameters": {
+                "message": {
+                    "type": "string",
+                    "description": "Commit message for GitHub code sync",
+                    "required": true
+                }
+            }
+        }
+    }
+}

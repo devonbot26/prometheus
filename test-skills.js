@@ -35,12 +35,26 @@ async function testWeather() {
     }
 }
 
+import { drive_backup } from './skills/google-drive/bridge.js';
+
+async function testDriveBackup() {
+    console.log('--- Testing Google Drive Backup ---');
+    try {
+        const result = await drive_backup();
+        console.log('✅ Drive Backup result:', result);
+    } catch (e) {
+        console.error('❌ Drive Backup Error:', e.message);
+    }
+}
+
 async function runTests() {
     await testGmail();
     console.log('');
     await testWebSearch();
     console.log('');
     await testWeather();
+    console.log('');
+    await testDriveBackup();
     console.log('\n🏁 Tests Finished.');
 }
 
