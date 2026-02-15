@@ -15,8 +15,8 @@ const SCOPES = [
     'https://www.googleapis.com/auth/drive.file' // Permission to create/access files created by the app
 ];
 
-const CREDENTIALS_PATH = '/Users/devonwong/Documents/ai-gmail-agent/credentials.json';
-const TOKEN_PATH = '/Users/devonwong/Documents/ai-gmail-agent/token.json';
+const CREDENTIALS_PATH = '/Users/devonwong/Documents/Projects/ai-gmail-agent/credentials.json';
+const TOKEN_PATH = '/Users/devonwong/Documents/Projects/ai-gmail-agent/token.json';
 
 async function saveCredentials(client) {
     const content = await fs.readFile(CREDENTIALS_PATH);

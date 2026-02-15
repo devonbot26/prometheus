@@ -19,6 +19,18 @@
                 "tool_spec": "The JSON object describing the tool for skill.json"
             }
         },
+        "consult_senior_dev": {
+            "path": "index.js",
+            "function": "consult_senior_dev",
+            "description": "Ask the Senior Developer (Gemini Flash) to write complex code or solve hard problems.",
+            "parameters": {
+                "prompt": {
+                    "type": "string",
+                    "description": "Detailed description of the code or solution needed",
+                    "required": true
+                }
+            }
+        },
         "install_skill": {
             "path": "index.js",
             "function": "install_skill",

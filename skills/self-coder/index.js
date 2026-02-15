@@ -6,6 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { prompt } from '../../core/llm.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SKILLS_ROOT = path.resolve(__dirname, '../../skills');
@@ -87,5 +88,66 @@ export async function install_skill(args) {
     } catch (e) {
         console.error('Install error:', e);
         return { error: e.message };
+    }
+}
+
+export async function consult_senior_dev(args) {
+    const { prompt: userPrompt } = args;
+    console.log('🤖 Consulting Senior Dev (Gemini)...');
+
+    // System instruction injected into prompt
+    const enhancedPrompt = `
+You are a Senior Software Engineer acting as a mentor to a junior AI agent.
+Your task is to implement a new skill for the agent based on the request.
+
+Structure your response as a valid JSON object with the following fields:
+{
+  "name": "skill-name (kebab-case)",
+  "description": "Short description of what the skill does",
+  "code_js": "The full JavaScript (ESM) code for the skill. Must export functions matching tool names.",
+  "tool_spec": {
+     "function_name": {
+        "function": "function_name",
+        "description": "Description",
+        "parameters": { ... }
+     }
+  }
+}
+
+Do not include markdown or extra text outside the JSON.
+Ensure the JSON is valid and escaped correctly.
+
+Request: ${userPrompt}
+`;
+
+    try {
+        const result = await prompt(enhancedPrompt, { temperature: 0.2, maxTokens: 4000 });
+        let jsonStr = result.text.trim();
+
+        // Remove markdown code blocks if present
+        if (jsonStr.startsWith('```json')) {
+            jsonStr = jsonStr.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+        } else if (jsonStr.startsWith('```')) {
+            jsonStr = jsonStr.replace(/^```\s*/, '').replace(/\s*```$/, '');
+        }
+
+        const skillData = JSON.parse(jsonStr);
+
+        // Auto-draft the skill
+        console.log(`📝 Auto-drafting skill: ${skillData.name}`);
+        const draftResult = await create_draft_skill(skillData);
+
+        if (draftResult.success) {
+            return {
+                success: true,
+                advice: `I have successfully drafted the skill "${skillData.name}"!\n\nDescription: ${skillData.description}\n\nYou can now ask the user: "I drafted the ${skillData.name} skill. Do you want me to install it?"`,
+                model: result.model
+            };
+        } else {
+            return { error: `Failed to draft skill: ${draftResult.error}` };
+        }
+
+    } catch (e) {
+        return { error: `Senior Dev error: ${e.message}` };
     }
 }

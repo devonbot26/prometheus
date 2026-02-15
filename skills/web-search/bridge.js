@@ -3,7 +3,7 @@
  * Directly integrates logic from ~/Documents/ai-web-agent.
  */
 
-import Agent from '/Users/devonwong/Documents/ai-web-agent/src/agent.js';
+import Agent from '/Users/devonwong/Documents/Projects/ai-web-agent/src/agent.js';
 
 let agentInstance = null;
 

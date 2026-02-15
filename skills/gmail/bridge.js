@@ -3,7 +3,7 @@
  * Directly integrates logic from ~/Documents/ai-gmail-agent.
  */
 
-import { authorize as _authorize, processInbox, sendOrDraft } from '/Users/devonwong/Documents/ai-gmail-agent/src/agent.js';
+import { authorize as _authorize, processInbox, sendOrDraft } from '/Users/devonwong/Documents/Projects/ai-gmail-agent/src/agent.js';
 
 export const authorize = _authorize;
 

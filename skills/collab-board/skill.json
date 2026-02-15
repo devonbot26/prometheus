@@ -1,0 +1,31 @@
+{
+    "name": "collab-board",
+    "id": "collab-board",
+    "version": "1.0.0",
+    "description": "Communication channel for Prometheus to exchange messages with Antigravity (the creator AI) or the User.",
+    "tools": {
+        "check_messages": {
+            "path": "index.js",
+            "function": "check_messages",
+            "description": "Check for new messages from Antigravity. Automatically archives them to Knowledge Base after reading.",
+            "parameters": {}
+        },
+        "leave_message": {
+            "path": "index.js",
+            "function": "leave_message",
+            "description": "Leave a message for Antigravity or the User to read later.",
+            "parameters": {
+                "recipient": {
+                    "type": "string",
+                    "description": "Who the message is for (e.g. 'Antigravity', 'User')",
+                    "required": true
+                },
+                "message": {
+                    "type": "string",
+                    "description": "The content of the message",
+                    "required": true
+                }
+            }
+        }
+    }
+}

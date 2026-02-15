@@ -13,6 +13,7 @@ Project Prometheus is a custom AI assistant framework designed for maximum user 
     *   **Google Drive**: Autonomous backup and restoration of agent memory and databases.
     *   **Knowledge Base (RAG)**: Remembers long-term information in a local vector database using `[[Obsidian-style]]` linkage.
     *   **Self-Coder**: Can write and install its own new skills (with user approval).
+    *   **Collab Board**: Async messaging system for Antigravity <-> Prometheus communication.
 
 ## 🏗️ Architecture
 
@@ -21,9 +22,10 @@ Prometheus uses a "Direct Integration" pattern for agents, running them within t
 ```
 prometheus/
 ├── core/             # Orchestrator, LLM interface, Skill loader
-├── skills/           # Modular skills (gmail, web-search, drive, knowledge-base, self-coder)
+├── skills/           # Modular skills (gmail, web-search, drive, knowledge-base, self-coder, sys-admin, collab-board)
 ├── channels/         # User interfaces (CLI, etc.)
 ├── scripts/          # Setup and maintenance scripts
+├── messages/         # Shared inbox/outbox for async communication
 └── package.json
 ```
 

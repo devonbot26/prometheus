@@ -13,9 +13,9 @@ const BACKUP_FOLDER_NAME = 'Prometheus-Backup';
 
 // Paths to backup
 const FILES_TO_BACKUP = [
-    { local: '/Users/devonwong/Documents/prometheus/core/history.json', name: 'history.json' },
-    { local: '/Users/devonwong/Documents/ai-web-agent/data/agent.db', name: 'agent.db' },
-    { local: '/Users/devonwong/Documents/prometheus/.env', name: 'prometheus.env' }
+    { local: '/Users/devonwong/Documents/Projects/prometheus/core/history.json', name: 'history.json' },
+    { local: '/Users/devonwong/Documents/Projects/ai-web-agent/data/agent.db', name: 'agent.db' },
+    { local: '/Users/devonwong/Documents/Projects/prometheus/.env', name: 'prometheus.env' }
 ];
 
 async function getDriveService() {

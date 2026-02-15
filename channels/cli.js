@@ -37,6 +37,38 @@ function ask() {
             return ask();
         }
 
+        // Slash Commands
+        if (trimmed.startsWith('/')) {
+            const args = trimmed.split(' ');
+            const cmd = args[0].toLowerCase();
+
+            if (cmd === '/notebook') {
+                const path = args[1];
+                agent.setNotebook(path);
+                ask();
+                return;
+            }
+
+            if (cmd === '/podcast') {
+                try {
+                    const script = await agent.generatePodcast();
+                    console.log('\n🎙️  PODCAST SCRIPT GENERATED:\n');
+                    console.log(script);
+                    console.log('\n🔊 Audio is playing in the background...\n');
+                } catch (e) {
+                    console.error(`❌ ${e.message}`);
+                }
+                ask();
+                return;
+            }
+
+            if (cmd === '/close') {
+                agent.setNotebook(null);
+                ask();
+                return;
+            }
+        }
+
         try {
             const response = await agent.process(trimmed);
             console.log(`\nDevon [${response.model}]: ${response.text}\n`);
