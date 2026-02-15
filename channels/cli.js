@@ -62,6 +62,31 @@ function ask() {
                 return;
             }
 
+            if (cmd === '/exam') {
+                try {
+                    const exam = await agent.runNotebookPrompt('exam_predictor.md');
+                    console.log('\n📝 MOCK EXAM GENERATED:\n');
+                    console.log(exam);
+                    console.log('\n(Good luck!)\n');
+                } catch (e) {
+                    console.error(`❌ ${e.message}`);
+                }
+                ask();
+                return;
+            }
+
+            if (cmd === '/study') {
+                try {
+                    const notes = await agent.runNotebookPrompt('lecture_decoder.md');
+                    console.log('\n📚 LECTURE DECODED:\n');
+                    console.log(notes);
+                } catch (e) {
+                    console.error(`❌ ${e.message}`);
+                }
+                ask();
+                return;
+            }
+
             if (cmd === '/close') {
                 agent.setNotebook(null);
                 ask();

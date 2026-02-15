@@ -133,6 +133,43 @@ export class Agent {
     }
 
     /**
+     * Run a specific notebook prompt template
+     */
+    async runNotebookPrompt(templateName) {
+        if (!this.activeNotebook) {
+            throw new Error('No notebook open. Use /notebook <path> first.');
+        }
+
+        console.log(`🤔 Running ${templateName} analysis...`);
+
+        // 1. Read files in notebook
+        const files = fs.readdirSync(this.activeNotebook).filter(f => f.endsWith('.md') || f.endsWith('.txt'));
+        let context = '';
+        for (const file of files) {
+            const content = fs.readFileSync(path.join(this.activeNotebook, file), 'utf-8');
+            context += `\n--- FILE: ${file} ---\n${content}\n`;
+            if (context.length > 20000) break; // Hard limit for now
+        }
+
+        // 2. Read prompt template
+        const promptPath = path.join(__dirname, `../prompts/notebook/${templateName}`);
+        if (!fs.existsSync(promptPath)) {
+            throw new Error(`Prompt template not found: ${templateName}`);
+        }
+        const promptTemplate = fs.readFileSync(promptPath, 'utf-8');
+
+        // 3. Construct prompt
+        const fullPrompt = promptTemplate.replace('[SOURCE_TEXT_GOES_HERE]', context);
+
+        // 4. Call LLM
+        const response = await chat([
+            { role: 'user', content: fullPrompt }
+        ], { forceLocal: true, maxTokens: 4096 });
+
+        return response.text;
+    }
+
+    /**
      * Process a user message and return the assistant's response
      * @param {string} userMessage
      * @returns {Promise<string>}
