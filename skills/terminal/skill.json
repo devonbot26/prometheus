@@ -1,0 +1,20 @@
+{
+    "name": "terminal",
+    "id": "terminal",
+    "version": "1.0.0",
+    "description": "System Administrator — Execute shell commands on the local machine",
+    "tools": {
+        "terminal_run": {
+            "path": "bridge.js",
+            "function": "terminal_run",
+            "description": "Execute ANY shell command. Use this to list files (ls), read files (cat), or run scripts. You are a System Admin.",
+            "parameters": {
+                "command": {
+                    "type": "string",
+                    "description": "The exact shell command to run (e.g. 'ls -la Documents')",
+                    "required": true
+                }
+            }
+        }
+    }
+}

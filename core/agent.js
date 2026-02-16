@@ -19,8 +19,11 @@ import { buildSystemPrompt } from './identity.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HISTORY_PATH = path.join(__dirname, 'history.json');
 
-export class Agent {
+import { EventEmitter } from 'events';
+
+export class Agent extends EventEmitter {
     constructor() {
+        super();
         this.skills = loadSkills();
         this.toolDescriptions = getToolDescriptions(this.skills);
         this.systemPrompt = buildSystemPrompt(this.toolDescriptions);
@@ -193,6 +196,9 @@ export class Agent {
         // Build messages array for LLM
         const messages = [
             { role: 'system', content: systemContext },
+            // Few-shot training (Force the model to see how it's done)
+            { role: 'user', content: 'List files in Documents' },
+            { role: 'assistant', content: '```json\n{"tool": "terminal_run", "args": {"command": "ls ~/Documents"}}\n```' },
             ...this.history
         ];
 
@@ -200,6 +206,9 @@ export class Agent {
         const isPrivate = this.isPrivateRequest(userMessage) || !!this.activeNotebook; // Force local for notebooks
 
         // Get LLM response
+        console.log(`🔍 Context: ${systemContext.length} chars. Tools: ${this.toolDescriptions.length} chars.`);
+        // console.log(this.systemPrompt); // Uncomment to see full prompt
+
         const response = await chat(messages, {
             forceLocal: isPrivate,
             maxTokens: 2048
@@ -214,7 +223,9 @@ export class Agent {
         if (toolCall) {
             try {
                 console.log(`🔧 Tool call detected: ${toolCall.tool}`);
+                this.emit('tool_start', { tool: toolCall.tool, args: toolCall.args });
                 const result = await executeTool(this.skills, toolCall.tool, toolCall.args);
+                this.emit('tool_end', { tool: toolCall.tool, result });
 
                 // Feed tool result back to LLM for natural response
                 const toolResultMsg = `Tool "${toolCall.tool}" returned:\n${JSON.stringify(result, null, 2)}`;
@@ -241,6 +252,8 @@ export class Agent {
         }
 
         this.saveHistory();
+        this.saveHistory();
+        this.emit('message', { role: 'assistant', content: assistantText, model: modelUsed });
         return { text: assistantText, model: modelUsed };
     }
 

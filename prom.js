@@ -3,6 +3,7 @@ import { createInterface } from 'readline';
 
 // Configuration
 const LLAMA_PORT = 18888;
+const WEB_PORT = 3000;
 const CHECK_INTERVAL = 30000; // Check health every 30s
 const HEALTH_TIMEOUT = 5000; // Wait 5s for health check response
 const STARTUP_SCRIPT = '/Users/devonwong/Documents/Projects/Project02_Llama/start_server.sh';
@@ -55,21 +56,31 @@ function startLlamaServer() {
 }
 
 /**
- * Kill any process using the LLAMA_PORT
+ * Kill any process using a specific port
  */
-async function killServer() {
+async function killPort(port) {
     return new Promise((resolve) => {
-        exec(`lsof -ti:${LLAMA_PORT} | xargs kill -9`, (err) => {
-            if (!err) console.log(`${C.red}💀 Killed unresponsive server on port ${LLAMA_PORT}${C.reset}`);
+        exec(`lsof -ti:${port} | xargs kill -9`, (err) => {
+            if (!err) console.log(`${C.red}💀 Killed process on port ${port}${C.reset}`);
             resolve();
         });
     });
 }
 
 /**
+ * Kill any process using the LLAMA_PORT
+ */
+async function killServer() {
+    await killPort(LLAMA_PORT);
+}
+
+/**
  * Main Loop
  */
 async function main() {
+    // 0. Clean up Web Port causing EADDRINUSE
+    await killPort(WEB_PORT);
+
     // 1. Initial Health Check
     let healthy = await checkServerHealth();
 
@@ -99,9 +110,13 @@ async function main() {
 
     console.log(`${C.green}✅ Llama Server is online on port ${LLAMA_PORT}${C.reset}`);
 
-    // 2. Start the CLI
-    console.log(`${C.blue}🚀 Launching Prometheus CLI...${C.reset}\n`);
-    const cli = spawn('node', ['channels/cli.js'], { stdio: 'inherit' });
+    // 2. Start the Interface (Web or CLI)
+    const isCli = process.argv.includes('--cli');
+    const script = isCli ? 'channels/cli.js' : 'channels/web_server.js';
+    const name = isCli ? 'Prometheus CLI' : 'Prometheus Web Server';
+
+    console.log(`${C.blue}🚀 Launching ${name}...${C.reset}\n`);
+    const cli = spawn('node', [script], { stdio: 'inherit' });
 
     cli.on('close', (code) => {
         console.log(`${C.dim}Prometheus exited with code ${code}${C.reset}`);

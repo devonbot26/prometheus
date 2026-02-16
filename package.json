@@ -6,6 +6,7 @@
     "main": "core/agent.js",
     "scripts": {
         "start": "node prom.js",
+        "start:cli": "node prom.js --cli",
         "dev": "node --watch channels/cli.js"
     },
     "dependencies": {
@@ -13,13 +14,15 @@
         "@modelcontextprotocol/sdk": "^1.26.0",
         "@xenova/transformers": "^2.15.0",
         "better-sqlite3": "^11.0.0",
-        "vectra": "^0.6.0",
         "cheerio": "^1.0.0",
         "dotenv": "^17.2.4",
+        "express": "^5.2.1",
         "google-auth-library": "^9.15.0",
         "googleapis": "^144.0.0",
         "node-fetch": "^3.3.0",
         "playwright": "^1.50.0",
-        "readline": "*"
+        "readline": "*",
+        "socket.io": "^4.8.3",
+        "vectra": "^0.6.0"
     }
 }

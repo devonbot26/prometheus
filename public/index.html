@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prometheus Dashboard</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --term-bg: #161b22;
+            --text: #c9d1d9;
+            --green: #2ea043;
+            --blue: #58a6ff;
+            --red: #f85149;
+            --yellow: #e3b341;
+        }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Courier New', Courier, monospace;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        #header {
+            padding: 10px 20px;
+            background: var(--term-bg);
+            border-bottom: 1px solid #30363d;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        #status {
+            font-weight: bold;
+            color: var(--green);
+        }
+        #main {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+        #chat-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #30363d;
+        }
+        #log-panel {
+            width: 40%;
+            background: #000;
+            color: var(--green);
+            overflow-y: auto;
+            padding: 10px;
+            font-size: 0.8rem;
+            border-left: 1px solid #30363d;
+        }
+        #messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .msg {
+            max-width: 80%;
+            padding: 10px;
+            border-radius: 8px;
+            line-height: 1.5;
+        }
+        .user {
+            align-self: flex-end;
+            background: var(--blue);
+            color: #fff;
+        }
+        .assistant {
+            align-self: flex-start;
+            background: var(--term-bg);
+            border: 1px solid #30363d;
+        }
+        #input-area {
+            padding: 20px;
+            border-top: 1px solid #30363d;
+            display: flex;
+            gap: 10px;
+        }
+        input {
+            flex: 1;
+            background: var(--term-bg);
+            border: 1px solid #30363d;
+            color: var(--text);
+            padding: 10px;
+            border-radius: 4px;
+            font-family: inherit;
+        }
+        button {
+            background: var(--green);
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <div>🔥 PROMETHeUS v2.0</div>
+        <div id="status">Idle</div>
+    </div>
+    <div id="main">
+        <div id="chat-panel">
+            <div id="messages"></div>
+            <div id="input-area">
+                <input type="text" id="msgInput" placeholder="Type a command..." autocomplete="off">
+                <button onclick="send()">Send</button>
+            </div>
+        </div>
+        <div id="log-panel">
+            <div class="log-entry">System initialized.</div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const messagesDiv = document.getElementById('messages');
+        const logDiv = document.getElementById('log-panel');
+        const statusDiv = document.getElementById('status');
+        const input = document.getElementById('msgInput');
+
+        socket.on('connect', () => {
+            log('Connected to Prometheus Core.');
+        });
+
+        socket.on('status', (msg) => {
+            statusDiv.textContent = msg;
+            if (msg === 'Thinking...') statusDiv.style.color = 'var(--yellow)';
+            else if (msg === 'Idle') statusDiv.style.color = 'var(--green)';
+            else statusDiv.style.color = 'var(--blue)';
+        });
+
+        socket.on('log', (msg) => {
+            log(msg);
+        });
+
+        socket.on('message', (data) => {
+            addMessage(data.role, data.content);
+        });
+
+        socket.on('history', (history) => {
+            messagesDiv.innerHTML = '';
+            history.forEach(h => addMessage(h.role, h.content));
+        });
+
+        function send() {
+            const text = input.value.trim();
+            if (!text) return;
+            // Optimistic update handled by server echo for now to keep sync simple
+            socket.emit('message', text);
+            input.value = '';
+        }
+
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') send();
+        });
+
+        function addMessage(role, text) {
+            const div = document.createElement('div');
+            div.className = `msg ${role}`;
+            
+            // Allow basic markdown-like checks (very simple)
+            if (text.includes('```')) {
+                const parts = text.split('```');
+                let html = '';
+                parts.forEach((part, i) => {
+                    if (i % 2 === 1) html += `<pre><code>${part}</code></pre>`;
+                    else html += part.replace(/\n/g, '<br>');
+                });
+                div.innerHTML = html;
+            } else {
+                div.textContent = text;
+            }
+            
+            messagesDiv.appendChild(div);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function log(text) {
+            const div = document.createElement('div');
+            div.className = 'log-entry';
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+            logDiv.appendChild(div);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+    </script>
+</body>
+</html>
