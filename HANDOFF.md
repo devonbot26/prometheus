@@ -8,7 +8,7 @@
 ## What Is This?
 
 **Project Prometheus** is a custom AI assistant framework replacing Clawdbot.
-Location: `~/Documents/prometheus/`
+Location: `~/Documents/Projects/prometheus/`
 
 The user (Devon Wong) was frustrated that Clawdbot's skill/plugin system is locked down
 and broken (`clawdhub` has missing dependencies, `skills.entries` rejects unknown keys).
@@ -52,7 +52,7 @@ prometheus/
 
 ```bash
 # 1. Install dependencies
-cd ~/Documents/prometheus
+cd ~/Documents/Projects/prometheus
 npm install
 
 # 2. Test the CLI
@@ -100,6 +100,7 @@ node channels/cli.js
 - Devon Wong's Gmail: `devonbot26@gmail.com`
 - Other email: `wongcw4@gmail.com` (Nelson Wong — trusted contact with phone number)
 - Local LLM: `http://127.0.0.1:18888`
+- GitHub SSH Passphrase: `Prometheus`
 - Clawdbot Gateway: still running on port `18789` (can coexist)
 - The user wants Devon to DO things, not be told to do things manually
 
@@ -112,5 +113,5 @@ Tell the user:
 
 Then run:
 ```bash
-cd ~/Documents/prometheus && npm install && node channels/cli.js
+cd ~/Documents/Projects/prometheus && npm install && node channels/cli.js
 ```

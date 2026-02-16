@@ -5,7 +5,7 @@
     "type": "module",
     "main": "core/agent.js",
     "scripts": {
-        "start": "node channels/cli.js",
+        "start": "node prom.js",
         "dev": "node --watch channels/cli.js"
     },
     "dependencies": {
