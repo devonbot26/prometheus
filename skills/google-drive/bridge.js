@@ -11,11 +11,13 @@ import { authorize } from '../gmail/bridge.js'; // Reuse Gmail's auth logic
 
 const BACKUP_FOLDER_NAME = 'Prometheus-Backup';
 
+const HOMEDIR = process.env.HOME || '/Users/nelsonwong';
+
 // Paths to backup
 const FILES_TO_BACKUP = [
-    { local: '/Users/devonwong/Documents/Projects/prometheus/core/history.json', name: 'history.json' },
-    { local: '/Users/devonwong/Documents/Projects/ai-web-agent/data/agent.db', name: 'agent.db' },
-    { local: '/Users/devonwong/Documents/Projects/prometheus/.env', name: 'prometheus.env' }
+    { local: path.join(process.cwd(), 'core', 'history.json'), name: 'history.json' },
+    { local: path.join(HOMEDIR, 'Documents/projects/ai-web-agent/data/agent.db'), name: 'agent.db' },
+    { local: path.join(process.cwd(), '.env'), name: 'prometheus.env' }
 ];
 
 async function getDriveService() {

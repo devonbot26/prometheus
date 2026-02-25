@@ -57,7 +57,7 @@ export function loadSkills() {
                 toolNames
             });
 
-            console.log(`✅ Loaded skill: ${manifest.name} (${toolNames.join(', ')})`);
+            console.log(`📄 Registered summary for: ${manifest.name} (${toolNames.join(', ')})`);
         } catch (e) {
             console.error(`❌ Failed to load skill ${entry.name}:`, e.message);
         }
@@ -100,6 +100,39 @@ export async function executeTool(skills, toolName, args = {}) {
 export function getToolDescriptions(skills) {
     const descriptions = [];
     for (const [name, skill] of skills) {
+        for (const toolName of skill.toolNames) {
+            const tool = skill.meta.tools[toolName];
+            const params = tool.parameters
+                ? Object.entries(tool.parameters).map(([k, v]) => `${k}: ${v.type}${v.required ? ' (required)' : ''}`).join(', ')
+                : 'none';
+            descriptions.push(`- ${toolName}: ${tool.description} [params: ${params}]`);
+        }
+    }
+    return descriptions.join('\n');
+}
+
+/**
+ * Get high-level summaries of all skills
+ */
+export function getSkillSummaries(skills) {
+    const summaries = [];
+    for (const [name, skill] of skills) {
+        summaries.push(`- ${name}: ${skill.meta.description || 'No description'}`);
+    }
+    return summaries.join('\n');
+}
+
+/**
+ * Get full tool descriptions for a specific set of skills
+ * @param {Map} skills - loaded skills map
+ * @param {string[]} skillNames - list of skills to get tools for
+ */
+export function getToolDescriptionsForSkills(skills, skillNames) {
+    const descriptions = [];
+    for (const name of skillNames) {
+        const skill = skills.get(name);
+        if (!skill) continue;
+
         for (const toolName of skill.toolNames) {
             const tool = skill.meta.tools[toolName];
             const params = tool.parameters

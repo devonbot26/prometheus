@@ -1,0 +1,8 @@
+{
+  "id": "ERR-030",
+  "timestamp": "2026-02-24T17:14:17.029Z",
+  "status": "active",
+  "error": "Unknown tool: sys-admin",
+  "context": "Tool call: sys-admin",
+  "steps_taken": []
+}

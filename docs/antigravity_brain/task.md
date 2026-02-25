@@ -23,10 +23,10 @@
     - [x] Create public/index.html
     - [x] Connect Agent events to Socket.io
 
-- [-] Terminal Skill (Executed shell commands)
+- [x] Terminal Skill (Executed shell commands)
     - [x] Create skills/terminal/skill.json
     - [x] Create skills/terminal/bridge.js
-    - [!] BLOCKED: 3B Model is too weak to use tool safely/reliably. Upgrade to 7B recommended.
+    - [x] UPGRADED: Qwen 2.5 7B model is now online and handling terminal tasks.
 
 - [x] Migration Support
     - [x] Create MIGRATION_GUIDE.md
@@ -34,12 +34,12 @@
     - [x] Run Full Backup (Code, Config, Memory, Documents) [Verified: 3.7GB Documents Uploaded]
 
 ## Active Task
-- [ ] assist User with Restoration on New Mac
+- [x] assist User with Restoration on New Mac <!-- id: restoration -->
 
 ## Enhancements
-- [ ] Auto-restart llama.cpp if unresponsive (timeout check)
-- [ ] Terminal Skill (Execute shell commands)
-- [ ] Dynamic LLM Switching (Qwen/Llama/Deepseeker)
-    - Coding: Qwen 2.5 Coder 7B
-    - General: Llama 3.1 8B
-    - Deep Thinker: DeepSeek-Coder-V2-Lite
+- [x] Auto-restart llama.cpp if unresponsive (Watchdog)
+- [x] Terminal Skill (System Administrator role)
+- [x] Dynamic LLM Switching (Tool-based)
+    - [x] Coding: Qwen 2.5 Coder 7B
+    - [x] General: Llama 3.1 8B (via Gemini)
+    - [/] Deep Thinker: DeepSeek-Coder-V2-Lite (5.8GB Downloaded) <!-- id: deepseek_install -->

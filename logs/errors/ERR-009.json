@@ -1,0 +1,8 @@
+{
+  "id": "ERR-009",
+  "timestamp": "2026-02-19T15:15:55.101Z",
+  "status": "active",
+  "error": "Failed to fetch weather for current location: fetch failed",
+  "context": "Tool call: get_weather",
+  "steps_taken": []
+}

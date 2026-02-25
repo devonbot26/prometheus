@@ -1,0 +1,8 @@
+{
+  "id": "ERR-016",
+  "timestamp": "2026-02-23T14:21:11.280Z",
+  "status": "active",
+  "error": "invalid_grant",
+  "context": "Tool call: gmail_scan",
+  "steps_taken": []
+}

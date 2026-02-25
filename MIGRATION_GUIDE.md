@@ -6,6 +6,19 @@
 1.  **Codebase**: From GitHub.
 2.  **Memory & Identity**: From Google Drive.
 
+## Target Hardware
+- **Model**: MacBook Pro (MacBookPro17,1)
+- **Chip**: Apple M1
+- **Cores**: 8 (4 performance and 4 efficiency)
+- **Memory**: 16 GB
+
+## Prerequisites
+Ensure the following tools are installed:
+- **llama.cpp**: Required for local LLM inference.
+  ```bash
+  brew install llama.cpp
+  ```
+
 ## Step 1: Clone the Codebase
 Execute the following command to retrieve the latest version of Prometheus:
 ```bash

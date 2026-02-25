@@ -1,0 +1,8 @@
+{
+  "id": "ERR-027",
+  "timestamp": "2026-02-24T17:09:45.993Z",
+  "status": "active",
+  "error": "Unknown tool: weather",
+  "context": "Tool call: weather",
+  "steps_taken": []
+}

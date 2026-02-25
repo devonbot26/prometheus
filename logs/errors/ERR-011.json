@@ -1,0 +1,8 @@
+{
+  "id": "ERR-011",
+  "timestamp": "2026-02-23T03:07:23.644Z",
+  "status": "active",
+  "error": "Cannot find module '/Users/devonwong/Documents/Projects/ai-web-agent/src/agent.js' imported from /Users/nelsonwong/Documents/projects/Prometheus/skills/web-search/bridge.js",
+  "context": "Tool call: web_search",
+  "steps_taken": []
+}

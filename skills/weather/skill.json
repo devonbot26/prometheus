@@ -3,7 +3,7 @@
     "description": "Get current weather for any city (NO API KEY required)",
     "tools": {
         "get_weather": {
-            "description": "Get current weather condition and temperature",
+            "description": "Get current weather condition, temperature, and 3-day forecast",
             "parameters": {
                 "location": {
                     "type": "string",

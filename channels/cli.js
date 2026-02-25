@@ -3,11 +3,19 @@
  * Simple terminal-based conversation with Devon.
  */
 
+console.log('[DEBUG] Loading channels/cli.js...');
 import 'dotenv/config';
 import readline from 'readline';
 import { Agent } from '../core/agent.js';
+import { initCronJobs } from '../core/cron.js';
 
 const agent = new Agent();
+
+// Start background cron scheduler
+initCronJobs(agent, (output) => {
+    // This callback prints background outputs explicitly to the CLI
+    console.log(output);
+});
 
 const rl = readline.createInterface({
     input: process.stdin,
@@ -29,7 +37,11 @@ function ask() {
         if (trimmed.toLowerCase() === 'quit' || trimmed.toLowerCase() === 'exit') {
             console.log('\n👋 See you later!');
             rl.close();
-            process.exit(0);
+            // Signal the parent launcher so it can kill the Llama server
+            if (process.send) {
+                process.send({ type: 'SHUTDOWN' });
+            }
+            setTimeout(() => process.exit(0), 100);
         }
 
         if (trimmed.toLowerCase() === 'reset') {
@@ -96,7 +108,11 @@ function ask() {
 
         try {
             const response = await agent.process(trimmed);
-            console.log(`\nDevon [${response.model}]: ${response.text}\n`);
+            const speedStr = response.tps ? ` (${response.tps} tok/s)` : '';
+            if (response.reasoning && response.reasoning !== response.text) {
+                console.log(`\n\x1b[2m[Thinking...]\x1b[0m\n\x1b[2m${response.reasoning}\x1b[0m`);
+            }
+            console.log(`\nDevon [${response.model}]${speedStr}: ${response.text}\n`);
         } catch (e) {
             console.error(`\n❌ Error: ${e.message}\n`);
         }

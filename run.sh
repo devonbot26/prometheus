@@ -1,3 +1,3 @@
 #!/bin/bash
-cd ~/Documents/prometheus
+cd ~/Documents/projects/Prometheus
 npm start

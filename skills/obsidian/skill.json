@@ -1,0 +1,105 @@
+{
+    "name": "obsidian",
+    "description": "Manage Obsidian vaults, notes, and interactive Canvas whiteboards",
+    "tools": {
+        "obsidian_list_notes": {
+            "description": "List all Markdown notes in the vault recursively",
+            "parameters": {
+                "vaultPath": {
+                    "type": "string",
+                    "description": "Absolute path to the vault (optional, uses default if omitted)"
+                }
+            }
+        },
+        "obsidian_read_note": {
+            "description": "Read the content of a specific note",
+            "parameters": {
+                "notePath": {
+                    "type": "string",
+                    "description": "Relative path to the note from vault root (e.g. 'folder/note.md')",
+                    "required": true
+                },
+                "vaultPath": {
+                    "type": "string",
+                    "description": "Absolute path to the vault"
+                }
+            }
+        },
+        "obsidian_write_note": {
+            "description": "Create or overwrite a note in the vault",
+            "parameters": {
+                "notePath": {
+                    "type": "string",
+                    "description": "Relative path to the note (e.g. 'journal/2024-02-22.md')",
+                    "required": true
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Full content of the note",
+                    "required": true
+                },
+                "vaultPath": {
+                    "type": "string",
+                    "description": "Absolute path to the vault"
+                }
+            }
+        },
+        "obsidian_append_note": {
+            "description": "Append content to an existing note",
+            "parameters": {
+                "notePath": {
+                    "type": "string",
+                    "description": "Relative path to the note",
+                    "required": true
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Content to append",
+                    "required": true
+                },
+                "vaultPath": {
+                    "type": "string",
+                    "description": "Absolute path to the vault"
+                }
+            }
+        },
+        "obsidian_search": {
+            "description": "Search for a text pattern across all notes in the vault",
+            "parameters": {
+                "query": {
+                    "type": "string",
+                    "description": "Text or regex pattern to search for",
+                    "required": true
+                },
+                "vaultPath": {
+                    "type": "string",
+                    "description": "Absolute path to the vault"
+                }
+            }
+        },
+        "obsidian_create_canvas": {
+            "description": "Generate an Obsidian .canvas file with nodes and edges",
+            "parameters": {
+                "canvasPath": {
+                    "type": "string",
+                    "description": "Relative path (e.g. 'Brainstorm.canvas')",
+                    "required": true
+                },
+                "nodes": {
+                    "type": "array",
+                    "description": "List of node objects with x, y, width, height, type, text/file/url",
+                    "required": true
+                },
+                "edges": {
+                    "type": "array",
+                    "description": "List of edge objects with fromNode, toNode, etc.",
+                    "required": true
+                },
+                "vaultPath": {
+                    "type": "string",
+                    "description": "Absolute path to the vault"
+                }
+            }
+        }
+    }
+}

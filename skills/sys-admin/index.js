@@ -69,3 +69,13 @@ export async function full_system_backup(args) {
         message: results.join('\n')
     };
 }
+export async function system_repair_gmail() {
+    console.log('🛠️ Repairing Gmail Authentication...');
+    try {
+        const scriptPath = path.join(PROJECT_ROOT, 'scripts', 'system_repair_gmail.js');
+        const { stdout } = await execPromise(`node ${scriptPath}`);
+        return { success: true, output: stdout };
+    } catch (e) {
+        return { error: `System repair failed: ${e.message}` };
+    }
+}

@@ -151,3 +151,93 @@ Request: ${userPrompt}
         return { error: `Senior Dev error: ${e.message}` };
     }
 }
+
+export async function switch_model(args) {
+    const { model } = args;
+    console.log(`🧠 Switching model brain to: ${model}`);
+
+    try {
+        let modelFile = null;
+        let responseMsg = "";
+
+        if (model === 'local' || model === 'qwen') {
+            modelFile = "qwen2.5-7b-instruct-q4_k_m.gguf";
+            responseMsg = "Switched to Local (Qwen 7B) model.";
+            setModelOverride('local');
+        } else if (model === 'deepseek' || model === 'thinker') {
+            modelFile = "DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf";
+            responseMsg = "Switched to DeepSeek-Coder-V2 (MoE 16B). I am now thinking deeply.";
+            setModelOverride('local'); // Still local, but different model
+        } else if (model === 'gemini' || model === 'flash') {
+            responseMsg = "Switched to Gemini Flash Cloud.";
+            setModelOverride('gemini');
+        } else {
+            setModelOverride(null);
+            responseMsg = "Reset to default behavior.";
+        }
+
+        // If we have a model file, tell the parent manager (prom.js) to restart the llama server
+        if (modelFile && process.send) {
+            process.send({ type: 'RESTART_LLAMA', model: modelFile });
+        }
+
+        return { success: true, message: responseMsg };
+    } catch (e) {
+        return { error: e.message };
+    }
+}
+
+export async function read_file(args) {
+    const { file_path } = args;
+    const fullPath = path.resolve(process.cwd(), file_path);
+
+    if (!fs.existsSync(fullPath)) {
+        return { error: `File not found: ${file_path}` };
+    }
+
+    try {
+        const content = fs.readFileSync(fullPath, 'utf-8');
+        const lines = content.split('\n');
+
+        // Safety: Limit large file reads to first 500 lines to preserve context window
+        if (lines.length > 500) {
+            return {
+                warning: 'File truncated to first 500 lines.',
+                content: lines.slice(0, 500).join('\n'),
+                total_lines: lines.length
+            };
+        }
+
+        return { content };
+    } catch (e) {
+        return { error: `Read error: ${e.message}` };
+    }
+}
+
+export async function apply_patch(args) {
+    const { file_path, target_content, replacement_content } = args;
+    const fullPath = path.resolve(process.cwd(), file_path);
+
+    if (!fs.existsSync(fullPath)) {
+        return { error: `File not found: ${file_path}` };
+    }
+
+    try {
+        let content = fs.readFileSync(fullPath, 'utf-8');
+
+        // Normalize line endings is hard without a library, so we rely on exact match for now.
+        // We trim only if strict match fails to be helpful.
+        if (content.includes(target_content)) {
+            const newContent = content.replace(target_content, replacement_content);
+            fs.writeFileSync(fullPath, newContent);
+            return { success: true, message: `Successfully patched ${file_path}` };
+        } else {
+            return {
+                success: false,
+                error: 'Target content not found in file. Please ensure exact match including whitespace.'
+            };
+        }
+    } catch (e) {
+        return { error: `Patch error: ${e.message}` };
+    }
+}

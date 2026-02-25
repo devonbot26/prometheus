@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -15,6 +16,7 @@
             --red: #f85149;
             --yellow: #e3b341;
         }
+
         body {
             background: var(--bg);
             color: var(--text);
@@ -24,6 +26,7 @@
             flex-direction: column;
             height: 100vh;
         }
+
         #header {
             padding: 10px 20px;
             background: var(--term-bg);
@@ -32,21 +35,25 @@
             justify-content: space-between;
             align-items: center;
         }
+
         #status {
             font-weight: bold;
             color: var(--green);
         }
+
         #main {
             flex: 1;
             display: flex;
             overflow: hidden;
         }
+
         #chat-panel {
             flex: 1;
             display: flex;
             flex-direction: column;
             border-right: 1px solid #30363d;
         }
+
         #log-panel {
             width: 40%;
             background: #000;
@@ -56,6 +63,7 @@
             font-size: 0.8rem;
             border-left: 1px solid #30363d;
         }
+
         #messages {
             flex: 1;
             overflow-y: auto;
@@ -64,28 +72,33 @@
             flex-direction: column;
             gap: 10px;
         }
+
         .msg {
             max-width: 80%;
             padding: 10px;
             border-radius: 8px;
             line-height: 1.5;
         }
+
         .user {
             align-self: flex-end;
             background: var(--blue);
             color: #fff;
         }
+
         .assistant {
             align-self: flex-start;
             background: var(--term-bg);
             border: 1px solid #30363d;
         }
+
         #input-area {
             padding: 20px;
             border-top: 1px solid #30363d;
             display: flex;
             gap: 10px;
         }
+
         input {
             flex: 1;
             background: var(--term-bg);
@@ -95,6 +108,7 @@
             border-radius: 4px;
             font-family: inherit;
         }
+
         button {
             background: var(--green);
             color: #fff;
@@ -104,6 +118,7 @@
             cursor: pointer;
             font-weight: bold;
         }
+
         .log-entry {
             margin-bottom: 5px;
             border-bottom: 1px solid #333;
@@ -111,10 +126,26 @@
         }
     </style>
 </head>
+
 <body>
     <div id="header">
-        <div>🔥 PROMETHeUS v2.0</div>
-        <div id="status">Idle</div>
+        <div style="display: flex; align-items: center; gap: 15px;">
+            <div>🔥 PROMETHeUS v2.0</div>
+            <div id="status">Idle</div>
+        </div>
+        <div id="quota-monitor" style="display: flex; align-items: center; gap: 15px; font-size: 0.75rem;">
+            <div id="active-model"
+                style="color: var(--blue); font-weight: bold; background: rgba(56, 139, 253, 0.1); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--blue);">
+                --</div>
+            <div id="refresh-timer" title="Time until quota reset">--:--:--</div>
+            <div
+                style="width: 150px; height: 10px; background: #30363d; border-radius: 5px; overflow: hidden; border: 1px solid #444;">
+                <div id="fuel-gauge"
+                    style="width: 100%; height: 100%; background: var(--green); transition: width 0.5s ease, background 0.5s;">
+                </div>
+            </div>
+            <div id="quota-percent">100% Remaining</div>
+        </div>
     </div>
     <div id="main">
         <div id="chat-panel">
@@ -151,8 +182,15 @@
             log(msg);
         });
 
+        socket.on('usage', (stats) => {
+            updateQuota(stats);
+        });
+
         socket.on('message', (data) => {
             addMessage(data.role, data.content);
+            if (data.model) {
+                document.getElementById('active-model').textContent = data.model;
+            }
         });
 
         socket.on('history', (history) => {
@@ -175,7 +213,7 @@
         function addMessage(role, text) {
             const div = document.createElement('div');
             div.className = `msg ${role}`;
-            
+
             // Allow basic markdown-like checks (very simple)
             if (text.includes('```')) {
                 const parts = text.split('```');
@@ -188,7 +226,7 @@
             } else {
                 div.textContent = text;
             }
-            
+
             messagesDiv.appendChild(div);
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
         }
@@ -200,6 +238,36 @@
             logDiv.appendChild(div);
             logDiv.scrollTop = logDiv.scrollHeight;
         }
+
+        function updateQuota(stats) {
+            const gauge = document.getElementById('fuel-gauge');
+            const percentText = document.getElementById('quota-percent');
+            const timer = document.getElementById('refresh-timer');
+
+            gauge.style.width = `${stats.percent}%`;
+            percentText.textContent = `${stats.percent}% Remaining`;
+
+            // Alert colors
+            if (stats.percent < 20) gauge.style.background = 'var(--red)';
+            else if (stats.percent < 50) gauge.style.background = 'var(--yellow)';
+            else gauge.style.background = 'var(--green)';
+
+            // Countdown
+            clearInterval(window.quotaInterval);
+            let timeRemaining = Math.floor(stats.msUntilReset / 1000);
+
+            const tick = () => {
+                if (timeRemaining <= 0) return;
+                const h = Math.floor(timeRemaining / 3600);
+                const m = Math.floor((timeRemaining % 3600) / 60);
+                const s = timeRemaining % 60;
+                timer.textContent = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+                timeRemaining--;
+            };
+            tick();
+            window.quotaInterval = setInterval(tick, 1000);
+        }
     </script>
 </body>
+
 </html>

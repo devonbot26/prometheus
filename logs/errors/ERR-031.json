@@ -1,0 +1,8 @@
+{
+  "id": "ERR-031",
+  "timestamp": "2026-02-24T17:16:07.317Z",
+  "status": "active",
+  "error": "Unknown tool: google-drive",
+  "context": "Tool call: google-drive",
+  "steps_taken": []
+}

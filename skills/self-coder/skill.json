@@ -42,6 +42,52 @@
                     "required": true
                 }
             }
+        },
+        "switch_model": {
+            "path": "index.js",
+            "function": "switch_model",
+            "description": "Swap the agent's brain between local (Qwen) and cloud (Gemini) models.",
+            "parameters": {
+                "model": {
+                    "type": "string",
+                    "description": "Target model: 'local' (Qwen), 'gemini' (Gemini Flash), or 'default' (Auto)",
+                    "required": true
+                }
+            }
+        },
+        "read_file": {
+            "path": "index.js",
+            "function": "read_file",
+            "description": "Read the content of a file (limit 500 lines). Useful for debugging.",
+            "parameters": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to the file to read (relative to project root)",
+                    "required": true
+                }
+            }
+        },
+        "apply_patch": {
+            "path": "index.js",
+            "function": "apply_patch",
+            "description": "Apply a precise search-and-replace patch to a file. safe than sed/echo.",
+            "parameters": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to the file to modify",
+                    "required": true
+                },
+                "target_content": {
+                    "type": "string",
+                    "description": "Exact string to find and replace (must match exactly)",
+                    "required": true
+                },
+                "replacement_content": {
+                    "type": "string",
+                    "description": "New string to replace the target with",
+                    "required": true
+                }
+            }
         }
     }
 }

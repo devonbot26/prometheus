@@ -1,0 +1,8 @@
+{
+  "id": "ERR-019",
+  "timestamp": "2026-02-23T15:57:10.230Z",
+  "status": "active",
+  "error": "Unknown tool: collab_board_post",
+  "context": "Tool call: collab_board_post",
+  "steps_taken": []
+}

@@ -1,0 +1,8 @@
+{
+  "id": "ERR-010",
+  "timestamp": "2026-02-19T15:16:39.884Z",
+  "status": "active",
+  "error": "Failed to fetch weather for Charlottetown, PEI: fetch failed",
+  "context": "Tool call: get_weather",
+  "steps_taken": []
+}

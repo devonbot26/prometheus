@@ -1,0 +1,8 @@
+{
+  "id": "ERR-007",
+  "timestamp": "2026-02-19T00:01:55.572Z",
+  "status": "active",
+  "error": "Unknown tool: self_coder",
+  "context": "Tool call: self_coder",
+  "steps_taken": []
+}

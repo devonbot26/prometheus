@@ -99,3 +99,56 @@ export async function query_knowledge(args) {
         return { error: e.message };
     }
 }
+
+export async function record_observation(args) {
+    const { observation, type, concepts } = args;
+    if (!observation) return { error: 'Observation text is required' };
+
+    try {
+        const text = `[${type.toUpperCase()}] Observation: ${observation}\nConcepts: ${concepts.join(', ')}`;
+        const vector = await getEmbedding(text);
+        const idx = await getIndex();
+
+        await idx.insertItem({
+            vector,
+            metadata: {
+                text,
+                type,
+                concepts,
+                observation,
+                timestamp: Date.now()
+            }
+        });
+
+        console.log(`📓 Recorded ${type} observation: "${observation.substring(0, 50)}..."`);
+        return { success: true, message: 'Observation recorded to long-term memory.' };
+    } catch (e) {
+        console.error('Observation error:', e);
+        return { error: e.message };
+    }
+}
+
+export async function update_project_timeline(args) {
+    const { summary } = args;
+    // Default to the project root
+    const timelinePath = path.resolve(process.cwd(), 'PROMETHEUS.md');
+
+    try {
+        const dateStr = new Date().toISOString().split('T')[0];
+        const timeStr = new Date().toLocaleTimeString();
+        const entry = `\n### ${dateStr} ${timeStr}\n- **Summary**: ${summary}\n`;
+
+        if (!fs.existsSync(timelinePath)) {
+            const header = `# Prometheus Project Timeline\n\nThis file tracks the autonomous progress and milestones of the Prometheus AI Assistant.\n`;
+            fs.writeFileSync(timelinePath, header + entry, 'utf-8');
+        } else {
+            fs.appendFileSync(timelinePath, entry, 'utf-8');
+        }
+
+        console.log(`📅 Updated project timeline: PROMETHEUS.md`);
+        return { success: true, file: timelinePath };
+    } catch (e) {
+        console.error('Timeline error:', e);
+        return { error: e.message };
+    }
+}

@@ -1,0 +1,13 @@
+# Config for Nanbeige4.1-3B-8bit LoRA fine-tuning
+model: "mlx-community/Nanbeige4.1-3B-8bit"
+train: true
+data: "data"
+iters: 100
+batch_size: 1
+steps_per_report: 10
+steps_per_eval: 20
+learning_rate: 1e-5
+adapter_path: "adapters"
+save_every: 50
+max_seq_length: 1024
+grad_checkpoint: true

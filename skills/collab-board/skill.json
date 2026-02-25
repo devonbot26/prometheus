@@ -2,7 +2,7 @@
     "name": "collab-board",
     "id": "collab-board",
     "version": "1.0.0",
-    "description": "Communication channel for Prometheus to exchange messages with Antigravity (the creator AI) or the User.",
+    "description": "System reporting channel. ONLY use if explicitly asked to 'send a report' or 'leave a message'. NOT FOR GREETINGS.",
     "tools": {
         "check_messages": {
             "path": "index.js",
@@ -18,6 +18,23 @@
                 "recipient": {
                     "type": "string",
                     "description": "Who the message is for (e.g. 'Antigravity', 'User')",
+                    "required": true
+                },
+                "message": {
+                    "type": "string",
+                    "description": "The content of the message",
+                    "required": true
+                }
+            }
+        },
+        "collab_board_post": {
+            "path": "index.js",
+            "function": "leave_message",
+            "description": "Compatibility wrapper for leave_message. Post a message to the collab board.",
+            "parameters": {
+                "recipient": {
+                    "type": "string",
+                    "description": "Who the message is for",
                     "required": true
                 },
                 "message": {

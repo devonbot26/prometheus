@@ -1,0 +1,8 @@
+{
+  "id": "ERR-002",
+  "timestamp": "2026-02-18T15:32:22.307Z",
+  "status": "active",
+  "error": "fetch failed",
+  "context": "Tool call: terminal_run",
+  "steps_taken": []
+}

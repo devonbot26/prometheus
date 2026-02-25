@@ -23,3 +23,10 @@ yarn-error.log*
 # Other temporary files
 .prometheus/
 tmp/
+
+# Large binaries and weights
+models/
+adapters/
+*.tar.gz
+*.gguf
+*.safetensors

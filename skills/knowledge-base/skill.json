@@ -31,6 +31,40 @@
                     "required": true
                 }
             }
+        },
+        "record_observation": {
+            "path": "index.js",
+            "function": "record_observation",
+            "description": "Save a structured observation (fact, error, success, milestone) with semantic concepts for long-term recall.",
+            "parameters": {
+                "observation": {
+                    "type": "string",
+                    "description": "The distilled facts or events to record",
+                    "required": true
+                },
+                "type": {
+                    "type": "string",
+                    "description": "Type of observation: 'success', 'error', 'milestone', 'fact', or 'context'",
+                    "required": true
+                },
+                "concepts": {
+                    "type": "array",
+                    "description": "List of semantic tags or topics related to this observation (e.g. ['python', 'bug-fix', 'mlx'])",
+                    "required": true
+                }
+            }
+        },
+        "update_project_timeline": {
+            "path": "index.js",
+            "function": "update_project_timeline",
+            "description": "Update the human-readable PROMETHEUS.md file in the project root with a summary of recent progress.",
+            "parameters": {
+                "summary": {
+                    "type": "string",
+                    "description": "Concise summary of what was accomplished in this session",
+                    "required": true
+                }
+            }
         }
     }
 }

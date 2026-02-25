@@ -23,28 +23,32 @@ app.use(express.static(PUBLIC_DIR));
 io.on('connection', (socket) => {
     console.log('🌐 Web Client Connected');
 
-    // Send History on connection
-    socket.emit('history', agent.history);
+    // Send stats on connection
+    socket.emit('usage', agent.quotaTracker.getStats());
 
     // Handle incoming messages from UI
-    socket.on('message', async (msg) => {
-        // Emit user message back to all clients immediately (optimistic UI)
-        io.emit('message', { role: 'user', content: msg });
-
-        // Process with Agent
+    socket.on('message', async (text) => {
         try {
-            // Processing...
-            io.emit('status', 'Thinking...');
-            await agent.process(msg);
-            io.emit('status', 'Idle');
+            socket.emit('status', 'Thinking...');
+            // In the UI, the user message is added optimistically or echoed here
+            socket.emit('message', { role: 'user', content: text });
+
+            const result = await agent.process(text);
+            // Result is emitted by agent.on('message') in Agent constructor or process
+            // But we can also handle final output here if needed.
+            socket.emit('status', 'Idle');
         } catch (e) {
-            io.emit('error', e.message);
-            io.emit('status', 'Error');
+            socket.emit('status', 'Error');
+            socket.emit('message', { role: 'assistant', content: `⚠️ Error: ${e.message}` });
         }
     });
 });
 
 // Bind Agent Events to Socket.io
+agent.on('usage', (stats) => {
+    io.emit('usage', stats);
+});
+
 agent.on('message', (msg) => {
     io.emit('message', msg);
 });
