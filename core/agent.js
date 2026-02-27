@@ -47,6 +47,7 @@ function getFreeMemMB() {
     return Math.floor(os.freemem() / (1024 * 1024));
 }
 const HISTORY_PATH = path.join(__dirname, 'history.json');
+const STATE_PATH = path.join(__dirname, '..', 'STATE.md');
 
 import { EventEmitter } from 'events';
 
@@ -59,6 +60,33 @@ export class Agent extends EventEmitter {
         this.systemPrompt = buildSystemPrompt(this.skillSummaries);
         this.history = this.loadHistory();
         this.quotaTracker = quotaTracker;
+        this.activeMode = 'primary';
+
+        const interrupted = this.checkInterruptedState();
+        if (interrupted) {
+            this.history.push({ role: 'system', content: `⚠️ Previous session was interrupted mid-execution:\n${interrupted}\nPlease inform the user.` });
+        }
+        this.clearState();
+    }
+
+    setMode(mode) {
+        if (!['primary', 'plan', 'build'].includes(mode)) return;
+
+        if (mode !== 'primary') {
+            const adapterPath = `adapters/${mode}`;
+            if (!fs.existsSync(path.join(__dirname, '..', adapterPath))) {
+                console.log(`⚠️  [WARNING] Adapter for ${mode} not found at ${adapterPath}. Falling back to primary mode.`);
+                this.activeMode = 'primary';
+                return;
+            }
+        }
+
+        this.activeMode = mode;
+    }
+
+    getAdapterPath() {
+        if (this.activeMode === 'primary') return null;
+        return `adapters/${this.activeMode}`;
     }
 
     loadHistory() {
@@ -225,19 +253,38 @@ export class Agent extends EventEmitter {
             'shell': ['terminal'],
             'git': ['sys-admin'],
             'weather': ['weather'],
+            'forecast': ['weather'],
             'knowledge': ['knowledge-base'],
             'save': ['knowledge-base'],
             'learn': ['knowledge-base'],
+            'remember': ['knowledge-base'],
+            'memory': ['knowledge-base'],
+            'location': ['knowledge-base'],
             'skill': ['self-coder'],
             'coding': ['self-coder'],
             'script': ['self-coder', 'terminal'],
             'exam': ['self-coder'],
+            'react': ['self-coder'],
+            'component': ['self-coder'],
+            'fix': ['self-coder', 'sys-admin'],
+            'patch': ['self-coder'],
+            'write': ['self-coder'],
+            'implement': ['self-coder'],
+            'create': ['self-coder'],
             'collab': ['collab-board'],
-            'message': ['collab-board']
+            'message': ['collab-board'],
+            'scrape': ['web-scraper'],
+            'read': ['web-scraper', 'self-coder'],
+            'fetch': ['web-scraper'],
+            'http': ['web-scraper']
         };
 
+        // Check last 2 messages for context persistence
+        const recentHistory = (this.history || []).slice(-2).map(m => m.content).join(' ');
+        const fullContext = (userMessage + ' ' + recentHistory).toLowerCase();
+
         for (const [kw, skills] of Object.entries(keywordMap)) {
-            if (lowerMatch.includes(kw)) {
+            if (fullContext.includes(kw)) {
                 skills.forEach(s => {
                     if (!detectedSkills.includes(s)) detectedSkills.push(s);
                 });
@@ -282,9 +329,31 @@ export class Agent extends EventEmitter {
         const greetings = ['hi', 'hello', 'hey', 'greetings', 'reset'];
         const isSimpleGreeting = greetings.includes(cleanMessage.toLowerCase());
 
+        // AUTO-MODE DETECTION
+        if (this.activeMode === 'primary') {
+            const lowerMsg = cleanMessage.toLowerCase();
+            const planKeywords = ['design', 'architect', 'plan', 'outline', 'architecture'];
+            const buildKeywords = ['write', 'implement', 'code', 'build', 'fix', 'script'];
+
+            if (planKeywords.some(kw => lowerMsg.includes(kw))) {
+                console.log(`🧠 Auto-detect: Switching to 'plan' mode`);
+                this.setMode('plan');
+            } else if (buildKeywords.some(kw => lowerMsg.includes(kw))) {
+                console.log(`🧠 Auto-detect: Switching to 'build' mode`);
+                this.setMode('build');
+            }
+        }
+
         const dynamicTools = this.dynamicSkillInjection(cleanMessage);
 
         let finalPrompt = this.systemPrompt;
+
+        // PAIRED SYSTEM PROMPTS (Reinforce the LoRA behavior)
+        if (this.activeMode === 'plan') {
+            finalPrompt = "You are in PLAN mode. You are a senior software architect. Output ONLY Markdown architecture docs, outlines, and plans. Never write code blocks.\n\n" + finalPrompt;
+        } else if (this.activeMode === 'build') {
+            finalPrompt = "You are in BUILD mode. You are an expert software engineer. Output primarily production-ready code blocks. Explain briefly after.\n\n" + finalPrompt;
+        }
 
         if (lowMem || is3B) {
             console.log('[DEBUG] Using optimized prompt for 3B/LowMem');
@@ -293,6 +362,7 @@ export class Agent extends EventEmitter {
  2. ONLY use tools if you see them listed below under "AVAILABLE TOOLS".
  3. If no tools are listed, you cannot perform actions. Ask the user for details.
  4. Keep thinking <think> blocks under 10 words.
+ 5. To use a tool, you MUST output a valid JSON object in this exact format: {"tool": "tool_name", "args": {"param": "value"}}
 
 ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
         }
@@ -338,7 +408,8 @@ If you need to use a skill but don't see its parameters, use the following speci
         const response = await chat(messages, {
             forceLocal: isPrivate,
             deepThinking,
-            maxTokens: 2048
+            maxTokens: 2048,
+            adapterPath: this.getAdapterPath()
         });
         console.log('[DEBUG] Chat response received.');
 
@@ -406,14 +477,16 @@ If you need to use a skill but don't see its parameters, use the following speci
                     const followUp = await chat([
                         { role: 'system', content: finalPrompt },
                         ...this.history
-                    ], { forceLocal: isPrivate, maxTokens: 2048 });
+                    ], { forceLocal: isPrivate, maxTokens: 2048, adapterPath: this.getAdapterPath() });
 
                     assistantText = followUp.text;
                     finalTps = followUp.tps;
                 } else {
+                    this.writeState(toolCall.tool, toolCall.args, cleanMessage);
                     this.emit('tool_start', { tool: toolCall.tool, args: toolCall.args });
                     const result = await executeTool(this.skills, toolCall.tool, toolCall.args);
                     this.emit('tool_end', { tool: toolCall.tool, result });
+                    this.clearState();
 
                     // Check for explicit error return from tool
                     if (result && result.error) {
@@ -431,7 +504,7 @@ If you need to use a skill but don't see its parameters, use the following speci
                     const followUp = await chat([
                         { role: 'system', content: finalPrompt },
                         ...this.history
-                    ], { forceLocal: isPrivate, maxTokens: 2048 });
+                    ], { forceLocal: isPrivate, maxTokens: 2048, adapterPath: this.getAdapterPath() });
 
                     // Track follow-up quota
                     if (followUp.usage) {
@@ -611,5 +684,46 @@ If you need to use a skill but don't see its parameters, use the following speci
         this.history = [];
         this.saveHistory();
         console.log('🔄 Conversation reset.');
+    }
+
+    /**
+     * Write execution state before tool calls for crash recovery
+     */
+    writeState(toolName, args, userMessage) {
+        const state = [
+            '# Prometheus Execution State',
+            `> Auto-generated. If you see this file, it means execution was interrupted.`,
+            '',
+            `**Timestamp:** ${new Date().toISOString()}`,
+            `**Active Tool:** ${toolName}`,
+            `**User Message:** ${userMessage}`,
+            `**Args:** \`${JSON.stringify(args)}\``,
+            `**Status:** IN_PROGRESS`
+        ].join('\n');
+        try {
+            fs.writeFileSync(STATE_PATH, state);
+        } catch (e) {
+            console.error('⚠️ Failed to write STATE.md:', e.message);
+        }
+    }
+
+    clearState() {
+        try {
+            if (fs.existsSync(STATE_PATH)) fs.unlinkSync(STATE_PATH);
+        } catch (e) { /* ignore */ }
+    }
+
+    checkInterruptedState() {
+        try {
+            if (fs.existsSync(STATE_PATH)) {
+                const content = fs.readFileSync(STATE_PATH, 'utf-8');
+                if (content.includes('IN_PROGRESS')) {
+                    console.log('⚠️ Detected interrupted execution from previous session.');
+                    console.log(content);
+                    return content;
+                }
+            }
+        } catch (e) { /* ignore */ }
+        return null;
     }
 }

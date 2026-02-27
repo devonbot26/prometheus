@@ -1,0 +1,19 @@
+{
+    "name": "web-scraper",
+    "version": "1.0.0",
+    "description": "A stealth web scraper that fetches the readable text content of any website by bypassing anti-bot measures.",
+    "tools": {
+        "read_webpage": {
+            "description": "Navigate to a URL using a stealth headless browser, wait for the page to load, and return the visible text content. Useful for reading articles, bypassing Cloudflare, or getting raw data from dynamic sites.",
+            "parameters": {
+                "url": {
+                    "type": "string",
+                    "description": "The exact URL of the website to scrape."
+                }
+            },
+            "required": [
+                "url"
+            ]
+        }
+    }
+}

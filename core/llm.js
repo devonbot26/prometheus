@@ -40,6 +40,7 @@ async function callLocal(messages, options = {}) {
                 body: JSON.stringify({
                     model: options.deepThinking ? LOCAL_MODEL_14B : LOCAL_MODEL_7B,
                     messages,
+                    adapters: options.adapterPath || null,
                     temperature: options.temperature ?? 0.0,
                     max_tokens: options.maxTokens ?? 2048,
                     stream: false

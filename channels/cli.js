@@ -29,7 +29,8 @@ console.log('─'.repeat(50));
 console.log('');
 
 function ask() {
-    rl.question('You: ', async (input) => {
+    const modeTag = agent.activeMode !== 'primary' ? ` [${agent.activeMode}]` : '';
+    rl.question(`You${modeTag}: `, async (input) => {
         const trimmed = input.trim();
         console.log(`[DEBUG] Received input: "${trimmed}"`);
         if (!trimmed) return ask();
@@ -57,6 +58,18 @@ function ask() {
             if (cmd === '/notebook') {
                 const path = args[1];
                 agent.setNotebook(path);
+                ask();
+                return;
+            }
+
+            if (cmd === '/mode') {
+                const mode = args[1];
+                if (['primary', 'plan', 'build'].includes(mode)) {
+                    agent.setMode(mode);
+                    console.log(`🧠 Mode switched to: ${mode}`);
+                } else {
+                    console.log(`Current mode: ${agent.activeMode}. Options: primary, plan, build`);
+                }
                 ask();
                 return;
             }

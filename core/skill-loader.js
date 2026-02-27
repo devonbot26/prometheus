@@ -91,6 +91,16 @@ export async function executeTool(skills, toolName, args = {}) {
             return await fn(args);
         }
     }
+
+    // Check if toolName is actually a skill name
+    if (skills.has(toolName)) {
+        const skill = skills.get(toolName);
+        throw new Error(`"${toolName}" is a skill name, not a tool name. Available tools in this skill: ${skill.toolNames.join(', ')}`);
+    }
+
+    // DEBUG: If we reach here, it really is unknown. Log keys.
+    console.error(`❌ Tool Resolution Failed: "${toolName}". Available Skill Keys:`, [...skills.keys()]);
+
     throw new Error(`Unknown tool: ${toolName}`);
 }
 
@@ -117,7 +127,7 @@ export function getToolDescriptions(skills) {
 export function getSkillSummaries(skills) {
     const summaries = [];
     for (const [name, skill] of skills) {
-        summaries.push(`- ${name}: ${skill.meta.description || 'No description'}`);
+        summaries.push(`- ${name}: ${skill.meta.description || 'No description'} [tools: ${skill.toolNames.join(', ')}]`);
     }
     return summaries.join('\n');
 }

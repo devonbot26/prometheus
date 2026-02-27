@@ -12,7 +12,7 @@ export const IDENTITY = {
 - Use local tools for tasks. ONLY use 'collab-board' if explicitly asked to message someone.
 - Do NOT use tools for simple greetings (hi, hello).
 - If you use thinking tokens, keep the reasoning extremely brief (max 2-3 sentences).
-- Output JSON for tools (no text before/after).
+- To use a tool, you MUST output a valid JSON object in this exact format: {"tool": "tool_name", "args": {"param": "value"}} (no text before/after).
 {SKILL_SUMMARIES}`
 };
 

@@ -6,6 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
 import { prompt } from '../../core/llm.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -15,6 +16,19 @@ const STAGING_ROOT = path.resolve(__dirname, '../../skills/_staging');
 // Ensure staging directory exists
 if (!fs.existsSync(STAGING_ROOT)) {
     fs.mkdirSync(STAGING_ROOT, { recursive: true });
+}
+
+function autoCommit(filePath, message) {
+    try {
+        const projRoot = path.resolve(__dirname, '../..');
+        execSync(`git add "${filePath}"`, { cwd: projRoot, stdio: 'pipe' });
+        execSync(`git commit -m "${message}"`, { cwd: projRoot, stdio: 'pipe' });
+        console.log(`📦 Auto-committed: ${message}`);
+        return true;
+    } catch (e) {
+        console.error('⚠️ Auto-commit failed:', e.message);
+        return false;
+    }
 }
 
 export async function create_draft_skill(args) {
@@ -49,6 +63,8 @@ export async function create_draft_skill(args) {
         };
 
         fs.writeFileSync(path.join(skillDir, 'skill.json'), JSON.stringify(skillJson, null, 4));
+
+        autoCommit(skillDir, `feat(self-coder): draft skill "${cleanName}"`);
 
         console.log(`📝 Drafted skill "${cleanName}" in staging.`);
         return {
@@ -230,7 +246,25 @@ export async function apply_patch(args) {
         if (content.includes(target_content)) {
             const newContent = content.replace(target_content, replacement_content);
             fs.writeFileSync(fullPath, newContent);
-            return { success: true, message: `Successfully patched ${file_path}` };
+
+            // Mandatory verification: re-read and confirm
+            const verifyContent = fs.readFileSync(fullPath, 'utf-8');
+            const verified = verifyContent.includes(replacement_content);
+
+            autoCommit(fullPath, `fix(self-coder): patch ${path.basename(file_path)}`);
+
+            if (!verified) {
+                return {
+                    success: false,
+                    error: 'VERIFICATION FAILED: Patch was written but replacement content not found on re-read. File may be corrupted.'
+                };
+            }
+
+            return {
+                success: true,
+                verified: true,
+                message: `Successfully patched and verified ${file_path}`
+            };
         } else {
             return {
                 success: false,
