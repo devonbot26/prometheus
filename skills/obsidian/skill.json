@@ -3,6 +3,8 @@
     "description": "Manage Obsidian vaults, notes, and interactive Canvas whiteboards",
     "tools": {
         "obsidian_list_notes": {
+            "path": "index.js",
+            "function": "obsidian_list_notes",
             "description": "List all Markdown notes in the vault recursively",
             "parameters": {
                 "vaultPath": {
@@ -12,6 +14,8 @@
             }
         },
         "obsidian_read_note": {
+            "path": "index.js",
+            "function": "obsidian_read_note",
             "description": "Read the content of a specific note",
             "parameters": {
                 "notePath": {
@@ -26,6 +30,8 @@
             }
         },
         "obsidian_write_note": {
+            "path": "index.js",
+            "function": "obsidian_write_note",
             "description": "Create or overwrite a note in the vault",
             "parameters": {
                 "notePath": {
@@ -45,6 +51,8 @@
             }
         },
         "obsidian_append_note": {
+            "path": "index.js",
+            "function": "obsidian_append_note",
             "description": "Append content to an existing note",
             "parameters": {
                 "notePath": {
@@ -64,6 +72,8 @@
             }
         },
         "obsidian_search": {
+            "path": "index.js",
+            "function": "obsidian_search",
             "description": "Search for a text pattern across all notes in the vault",
             "parameters": {
                 "query": {
@@ -78,6 +88,8 @@
             }
         },
         "obsidian_create_canvas": {
+            "path": "index.js",
+            "function": "obsidian_create_canvas",
             "description": "Generate an Obsidian .canvas file with nodes and edges",
             "parameters": {
                 "canvasPath": {

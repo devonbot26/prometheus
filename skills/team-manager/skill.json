@@ -1,0 +1,43 @@
+{
+    "name": "team-manager",
+    "description": "Orchestrates virtual agent teams by managing handoffs and delegation.",
+    "tools": {
+        "handoff_to": {
+            "path": "index.js",
+            "description": "Switches the current Prometheus persona to a specialized role. Calling this tool will immediately yield control to the next agent autonomously.",
+            "parameters": {
+                "role": {
+                    "type": "string",
+                    "description": "The name of the role to switch to (e.g., 'team-architect', 'team-coder').",
+                    "required": true
+                },
+                "context": {
+                    "type": "string",
+                    "description": "The specific context or requirements to pass to the next agent.",
+                    "required": true
+                }
+            }
+        },
+        "delegate_task": {
+            "path": "index.js",
+            "description": "Assigns a task to a specific role without switching immediately.",
+            "parameters": {
+                "role": {
+                    "type": "string",
+                    "description": "The target role.",
+                    "required": true
+                },
+                "task": {
+                    "type": "string",
+                    "description": "The task description.",
+                    "required": true
+                }
+            }
+        },
+        "get_team_status": {
+            "path": "index.js",
+            "description": "Provides a summary of each role's current focus and progress.",
+            "parameters": {}
+        }
+    }
+}

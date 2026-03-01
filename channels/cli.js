@@ -3,11 +3,19 @@
  * Simple terminal-based conversation with Devon.
  */
 
-console.log('[DEBUG] Loading channels/cli.js...');
 import 'dotenv/config';
 import readline from 'readline';
+import fs from 'fs';
+import path from 'path';
 import { Agent } from '../core/agent.js';
 import { initCronJobs } from '../core/cron.js';
+import { logDebug, toggleDebug } from '../core/logger.js';
+
+logDebug('[DEBUG] Loading channels/cli.js...');
+
+const HANDOFF_PATH = path.resolve(process.cwd(), 'HANDOFF.json');
+const MAX_AUTO_CONTINUES = 10;
+let autoStep = 0;
 
 const agent = new Agent();
 
@@ -32,7 +40,7 @@ function ask() {
     const modeTag = agent.activeMode !== 'primary' ? ` [${agent.activeMode}]` : '';
     rl.question(`You${modeTag}: `, async (input) => {
         const trimmed = input.trim();
-        console.log(`[DEBUG] Received input: "${trimmed}"`);
+        logDebug(`[DEBUG] Received input: "${trimmed}"`);
         if (!trimmed) return ask();
 
         if (trimmed.toLowerCase() === 'quit' || trimmed.toLowerCase() === 'exit') {
@@ -43,10 +51,18 @@ function ask() {
                 process.send({ type: 'SHUTDOWN' });
             }
             setTimeout(() => process.exit(0), 100);
+            return;
         }
 
-        if (trimmed.toLowerCase() === 'reset') {
+        if (trimmed.toLowerCase() === 'reset' || trimmed.toLowerCase() === '/clear') {
             agent.reset();
+            console.log('\n✨ [SYSTEM] Conversation history cleared and memory reset.\n');
+            return ask();
+        }
+
+        if (trimmed.toLowerCase() === '/debug') {
+            const state = toggleDebug();
+            console.log(`\n🐞 Debug mode is now ${state ? 'ON' : 'OFF'}\n`);
             return ask();
         }
 
@@ -117,20 +133,66 @@ function ask() {
                 ask();
                 return;
             }
+            if (cmd === '/file' || cmd === '/prompt') {
+                const filePath = args[1];
+                if (!filePath) {
+                    console.error('❌ Usage: /file <path/to/prompt.md>');
+                    ask();
+                    return;
+                }
+                try {
+                    const content = fs.readFileSync(filePath, 'utf-8');
+                    console.log(`\n📄 Loaded prompt from ${filePath}\n`);
+                    const response = await agent.process(content);
+                    await handleResponse(response);
+                } catch (e) {
+                    console.error(`❌ Failed to load or process file: ${e.message}`);
+                    ask();
+                }
+                return;
+            }
         }
 
-        try {
-            const response = await agent.process(trimmed);
+        async function handleResponse(response) {
             const speedStr = response.tps ? ` (${response.tps} tok/s)` : '';
             if (response.reasoning && response.reasoning !== response.text) {
                 console.log(`\n\x1b[2m[Thinking...]\x1b[0m\n\x1b[2m${response.reasoning}\x1b[0m`);
             }
             console.log(`\nDevon [${response.model}]${speedStr}: ${response.text}\n`);
-        } catch (e) {
-            console.error(`\n❌ Error: ${e.message}\n`);
+
+            if (response.auto_continue && autoStep < MAX_AUTO_CONTINUES) {
+                autoStep++;
+                try {
+                    if (fs.existsSync(HANDOFF_PATH)) {
+                        const handoff = JSON.parse(fs.readFileSync(HANDOFF_PATH, 'utf-8'));
+                        const wakeUp = `[SYSTEM] You are now the ${handoff.to}. Your task: ${handoff.context}`;
+                        console.log(`\n🤖 Auto-Continue [Step ${autoStep}/${MAX_AUTO_CONTINUES}]: Waking ${handoff.to}...\n`);
+
+                        const nextResponse = await agent.process(wakeUp);
+                        return handleResponse(nextResponse);
+                    }
+                } catch (e) {
+                    console.error(`❌ Relay Error: ${e.message}`);
+                }
+            }
+
+            // Chain complete or cap reached
+            if (autoStep > 0) {
+                autoStep = 0;
+                agent.setMode('primary');
+                console.log('✅ Agent relay complete. Returning to primary mode.');
+            }
+
+            ask();
         }
 
-        ask();
+        try {
+            const response = await agent.process(trimmed);
+            await handleResponse(response);
+        } catch (e) {
+            console.error(`\n❌ Error: ${e.message}\n`);
+            ask();
+        }
     });
 }
 

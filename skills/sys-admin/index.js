@@ -8,6 +8,7 @@ import util from 'util';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { drive_backup } from '../google-drive/bridge.js';
+import { logDebugError } from '../../core/logger.js';
 
 const execPromise = util.promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -41,7 +42,7 @@ export async function git_sync(args) {
 
         return { success: true, message: 'Codebase successfully synced to GitHub!' };
     } catch (e) {
-        console.error('Git error:', e);
+        logDebugError('Git error:', e);
         return { error: `Git sync failed: ${e.message}` };
     }
 }

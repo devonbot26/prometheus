@@ -9,7 +9,6 @@
  * 5. Return final response to user
  */
 
-console.log('[DEBUG] Loading core/agent.js...');
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -20,6 +19,9 @@ import { loadSkills, executeTool, getToolDescriptions, getSkillSummaries, getToo
 import { buildSystemPrompt } from './identity.js';
 import { quotaTracker } from './quota-tracker.js';
 import { errorManager } from './error-manager.js';
+import { logDebug, logDebugError } from './logger.js';
+
+logDebug('[DEBUG] Loading core/agent.js...');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -70,7 +72,15 @@ export class Agent extends EventEmitter {
     }
 
     setMode(mode) {
-        if (!['primary', 'plan', 'build'].includes(mode)) return;
+        const VALID_MODES = ['primary', 'plan', 'build', 'team-architect', 'team-coder', 'team-designer', 'team-qa'];
+        if (!VALID_MODES.includes(mode)) return;
+
+        if (!['primary', 'plan', 'build'].includes(mode)) {
+            // Team modes always fallback to primary if no specialized adapter exists,
+            // but we'll use ROLE_MODEL_MAP for routing in process()
+            this.activeMode = mode;
+            return;
+        }
 
         if (mode !== 'primary') {
             const adapterPath = `adapters/${mode}`;
@@ -86,6 +96,8 @@ export class Agent extends EventEmitter {
 
     getAdapterPath() {
         if (this.activeMode === 'primary') return null;
+        const adapterDir = path.join(__dirname, '..', `adapters/${this.activeMode}`);
+        if (!fs.existsSync(adapterDir)) return null;
         return `adapters/${this.activeMode}`;
     }
 
@@ -274,9 +286,27 @@ export class Agent extends EventEmitter {
             'collab': ['collab-board'],
             'message': ['collab-board'],
             'scrape': ['web-scraper'],
-            'read': ['web-scraper', 'self-coder'],
+            'read': ['self-coder', 'terminal'],
             'fetch': ['web-scraper'],
-            'http': ['web-scraper']
+            'http': ['web-scraper'],
+            'reddit': ['reddit-observer'],
+            'subreddit': ['reddit-observer'],
+            'youtube': ['youtube-analyst'],
+            'video': ['youtube-analyst'],
+            'transcript': ['youtube-analyst'],
+            'obsidian': ['obsidian'],
+            'note': ['obsidian'],
+            'vault': ['obsidian'],
+            'librarian': ['obsidian-librarian'],
+            'consolidate': ['obsidian-librarian'],
+            'scattered': ['obsidian-librarian'],
+            'duplicate': ['obsidian-librarian'],
+            'find': ['terminal', 'self-coder', 'obsidian-librarian'],
+            'sprint': ['self-coder', 'terminal'],
+            'project': ['self-coder', 'terminal'],
+            'team': ['team-manager'],
+            'handoff': ['team-manager'],
+            'delegate': ['team-manager']
         };
 
         // Check last 2 messages for context persistence
@@ -304,6 +334,7 @@ export class Agent extends EventEmitter {
      * @param {string} userMessage
      */
     async process(userMessage) {
+        let autoContinueFlag = false;
         // Detect Deep Thinking Command
         let deepThinking = false;
         let cleanMessage = userMessage;
@@ -323,11 +354,11 @@ export class Agent extends EventEmitter {
         const lowMem = freeMB < 500 && !disableCompressed;
 
         const is3B = (process.env.LLM_MODEL || '').includes('3B') || (process.env.LLM_MODEL || '').toLowerCase().includes('nanbeige');
-        console.log(`[DEBUG] Memory: ${freeMB}MB, LowMem: ${lowMem}, is3B: ${is3B}`);
+        logDebug(`[DEBUG] Memory: ${freeMB}MB, LowMem: ${lowMem}, is3B: ${is3B}`);
 
         // GREETING INTERCEPTOR (Stop 3B models from hallucinating tools for simple 'hi')
         const greetings = ['hi', 'hello', 'hey', 'greetings', 'reset'];
-        const isSimpleGreeting = greetings.includes(cleanMessage.toLowerCase());
+        let isSimpleGreeting = greetings.includes(cleanMessage.toLowerCase());
 
         // AUTO-MODE DETECTION
         if (this.activeMode === 'primary') {
@@ -353,10 +384,22 @@ export class Agent extends EventEmitter {
             finalPrompt = "You are in PLAN mode. You are a senior software architect. Output ONLY Markdown architecture docs, outlines, and plans. Never write code blocks.\n\n" + finalPrompt;
         } else if (this.activeMode === 'build') {
             finalPrompt = "You are in BUILD mode. You are an expert software engineer. Output primarily production-ready code blocks. Explain briefly after.\n\n" + finalPrompt;
+        } else if (this.activeMode.startsWith('team-')) {
+            const roleName = this.activeMode.replace('team-', '');
+            const teamPrompt = this.getTeamRolePrompt(roleName);
+            finalPrompt = teamPrompt + '\n\n' + finalPrompt;
+
+            const HANDOFF_PATH = path.join(__dirname, '..', 'HANDOFF.json');
+            if (fs.existsSync(HANDOFF_PATH)) {
+                try {
+                    const handoff = JSON.parse(fs.readFileSync(HANDOFF_PATH, 'utf-8'));
+                    finalPrompt += `\n\n## Handoff Context From Previous Agent\n${JSON.stringify(handoff, null, 2)}`;
+                } catch (e) { /* ignore */ }
+            }
         }
 
         if (lowMem || is3B) {
-            console.log('[DEBUG] Using optimized prompt for 3B/LowMem');
+            logDebug('[DEBUG] Using optimized prompt for 3B/LowMem');
             finalPrompt = `You are Devon, a conversational AI assistant.
  1. Always respond with text for simple talk (hi, hello, etc.).
  2. ONLY use tools if you see them listed below under "AVAILABLE TOOLS".
@@ -385,7 +428,7 @@ If you need to use a skill but don't see its parameters, use the following speci
                 finalPrompt += `\n--- ${file} ---\n${content.substring(0, 3000)}\n`; // Truncate per file
             }
         }
-        console.log('[DEBUG] Notebook context injection complete.');
+        logDebug('[DEBUG] Notebook context injection complete.');
 
         const messages = [];
         if (lowMem || is3B) {
@@ -395,23 +438,44 @@ If you need to use a skill but don't see its parameters, use the following speci
             messages.push({ role: 'system', content: finalPrompt });
             messages.push(...this.history);
         }
-        console.log('[DEBUG] Messages array prepared for LLM call.');
+        logDebug('[DEBUG] Messages array prepared for LLM call.');
 
-        // Determine if this should use local model (privacy check)
-        const isPrivate = this.isPrivateRequest(cleanMessage) || !!this.activeNotebook; // Force local for notebooks
+        // Prepare Model Routing
+        const ROLE_MODEL_MAP = {
+            'team-architect': { forceLocal: true },
+            'team-coder': { forceLocal: true },
+            'team-designer': { forceLocal: true },
+            'team-qa': { forceLocal: true }
+        };
 
-        // Get LLM response
-        console.log(`[DEBUG] Calling chat with ${messages.length} messages...`);
-        console.log(`[DEBUG] Full Messages: ${JSON.stringify(messages, null, 2)}`);
-        console.log(`🔍 Context: ${finalPrompt.length} chars. Dynamic Tools: ${dynamicTools?.length || 0} chars.`);
+        const isPrivate = this.isPrivateRequest(cleanMessage) || !!this.activeNotebook;
 
-        const response = await chat(messages, {
-            forceLocal: isPrivate,
+        const chatOptions = {
+            forceLocal: isPrivate || !!this.activeNotebook,
             deepThinking,
             maxTokens: 2048,
             adapterPath: this.getAdapterPath()
-        });
-        console.log('[DEBUG] Chat response received.');
+        };
+
+        if (ROLE_MODEL_MAP[this.activeMode]) {
+            const roleConfig = { ...ROLE_MODEL_MAP[this.activeMode] };
+            // Graceful fallback: if cloud is requested but no API key, use local instead
+            if (roleConfig.forceCloud && !process.env.GEMINI_API_KEY) {
+                console.log(`⚠️  [WARNING] ${this.activeMode} wants cloud (Gemini) but GEMINI_API_KEY is not set. Falling back to local.`);
+                delete roleConfig.forceCloud;
+                delete roleConfig.cloudModel;
+                roleConfig.forceLocal = true;
+            }
+            Object.assign(chatOptions, roleConfig);
+        }
+
+        // Get LLM response
+        logDebug(`[DEBUG] Calling chat with ${messages.length} messages...`);
+        logDebug(`[DEBUG] Full Messages: ${JSON.stringify(messages, null, 2)}`);
+        console.log(`🔍 Context: ${finalPrompt.length} chars. Dynamic Tools: ${dynamicTools?.length || 0} chars.`);
+
+        const response = await chat(messages, chatOptions);
+        logDebug('[DEBUG] Chat response received.');
 
         // Track quota
         if (response.usage) {
@@ -431,99 +495,121 @@ If you need to use a skill but don't see its parameters, use the following speci
             .replace(/<think>[\s\S]*?<\/think>/g, '') // Remove internal thinking tags if they leaked
             .trim();
 
-        // Loop Detector: If response is mostly junk tokens, it's a hallucination loop
-        const junkTokens = ['<unk>', '<s>', '</s>', '<|im_start|>', '<|im_end|>'];
-        const junkCount = junkTokens.reduce((count, token) => {
-            const matches = assistantText.match(new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'));
-            return count + (matches ? matches.length : 0);
-        }, 0);
+        let iterations = 0;
+        const MAX_ITERATIONS = 15; // Increased for complex research chains
 
-        if (junkCount > 5 || assistantText.length > 5000) {
-            console.error('⚠️ [DEBUG] Gibberish loop detected! Blocking response.');
-            assistantText = "I encountered a processing error (loop detected). How can I help you today?";
-            isSimpleGreeting = true; // Treat as greeting to reset flow
-        }
+        while (true) {
+            // Loop Detector: If response is mostly junk tokens, it's a hallucination loop
+            const junkTokens = ['<unk>', '<s>', '</s>', '<|im_start|>', '<|im_end|>'];
+            const junkCount = junkTokens.reduce((count, token) => {
+                const matches = assistantText.match(new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'));
+                return count + (matches ? matches.length : 0);
+            }, 0);
 
-        // If it's a greeting and the model tried to call a tool, strip the JSON to avoid showing it to user
-        if (isSimpleGreeting) {
-            assistantText = assistantText.replace(/```(?:json)?\s*\{[\s\S]*?\}\s*```/ig, '').trim();
-            assistantText = assistantText.replace(/\{[\s\n]*"tool"[\s\n]*:[\s\n]*"[^"]+"[\s\S]*?\}/g, '').trim();
-
-            if (!assistantText) {
-                assistantText = "Hello! I'm Devon. How can I help you today?";
+            if (junkCount > 5 || assistantText.length > 5000) {
+                logDebugError('⚠️ [DEBUG] Gibberish loop detected! Blocking response.');
+                assistantText = "I encountered a processing error (loop detected). How can I help you today?";
+                isSimpleGreeting = true; // Treat as greeting to reset flow
             }
-        }
 
-        // Check if LLM wants to call a tool (Bypass if it's a simple greeting to prevent hallucination)
-        const toolCall = isSimpleGreeting ? null : this.extractToolCall(assistantText);
+            // If it's a greeting and the model tried to call a tool, strip the JSON to avoid showing it to user
+            if (isSimpleGreeting) {
+                assistantText = assistantText.replace(/```(?:json)?\s*\{[\s\S]*?\}\s*```/ig, '').trim();
+                assistantText = assistantText.replace(/\{[\s\n]*"tool"[\s\n]*:[\s\n]*"[^"]+"[\s\S]*?\}/g, '').trim();
 
-        if (toolCall) {
-            try {
-                console.log(`🔧 Tool call detected: ${toolCall.tool}`);
-
-                // Handle CORE "get_skill_details" tool
-                if (toolCall.tool === 'get_skill_details') {
-                    const skillName = toolCall.args.skill_name;
-                    console.log(`📖 Detailed schema requested for: ${skillName}`);
-                    const details = getToolDescriptionsForSkills(this.skills, [skillName]);
-
-                    const toolResultMsg = details
-                        ? `Full schema for ${skillName}:\n${details}`
-                        : `Skill "${skillName}" not found. Available skills:\n${this.skillSummaries}`;
-
-                    this.history.push({ role: 'assistant', content: assistantText });
-                    this.history.push({ role: 'user', content: toolResultMsg });
-
-                    const followUp = await chat([
-                        { role: 'system', content: finalPrompt },
-                        ...this.history
-                    ], { forceLocal: isPrivate, maxTokens: 2048, adapterPath: this.getAdapterPath() });
-
-                    assistantText = followUp.text;
-                    finalTps = followUp.tps;
-                } else {
-                    this.writeState(toolCall.tool, toolCall.args, cleanMessage);
-                    this.emit('tool_start', { tool: toolCall.tool, args: toolCall.args });
-                    const result = await executeTool(this.skills, toolCall.tool, toolCall.args);
-                    this.emit('tool_end', { tool: toolCall.tool, result });
-                    this.clearState();
-
-                    // Check for explicit error return from tool
-                    if (result && result.error) {
-                        const errorId = errorManager.logError(result.error, `Tool call: ${toolCall.tool}`);
-                        // Append Error ID to the result so the agent knows about it
-                        result.error_id = errorId;
-                        result.system_note = `System logged error as ${errorId}. You should verify this error using read_file then fix it.`;
-                    }
-
-                    // Feed tool result back to LLM for natural response
-                    const toolResultMsg = `Tool "${toolCall.tool}" returned:\n${JSON.stringify(result, null, 2)}`;
-                    this.history.push({ role: 'assistant', content: assistantText });
-                    this.history.push({ role: 'user', content: toolResultMsg });
-
-                    const followUp = await chat([
-                        { role: 'system', content: finalPrompt },
-                        ...this.history
-                    ], { forceLocal: isPrivate, maxTokens: 2048, adapterPath: this.getAdapterPath() });
-
-                    // Track follow-up quota
-                    if (followUp.usage) {
-                        quotaTracker.deduct(followUp.usage.total_tokens);
-                        this.emit('usage', quotaTracker.getStats());
-                    }
-
-                    assistantText = followUp.text;
-                    finalTps = followUp.tps;
+                if (!assistantText) {
+                    assistantText = "Hello! I'm Devon. How can I help you today?";
                 }
-            } catch (e) {
-                // Error Logging Integration
-                const errorId = errorManager.logError(e, `Tool call: ${toolCall.tool}`);
-                assistantText = `⚠️ Tool error (ID: ${errorId}): ${e.message}. I have logged this error.`;
-
-                // Attempt to auto-fix if it's a code execution error (future: invoke self-coder)
-                // For now, we just inform the loop.
             }
-        }
+
+            // Check if LLM wants to call a tool (Bypass if it's a simple greeting to prevent hallucination)
+            let toolCall = isSimpleGreeting ? null : this.extractToolCall(assistantText);
+
+            if (!toolCall || iterations >= MAX_ITERATIONS) {
+                break;
+            }
+            iterations++;
+
+            if (toolCall) {
+                try {
+                    process.stdout.write(`\n\x1b[1m\x1b[36m🔧 [AUTONOMOUS] Tool call detected (${iterations}/${MAX_ITERATIONS}): ${toolCall.tool}\x1b[0m\n`);
+                    console.log(`🔧 Running ${toolCall.tool}...`);
+
+                    // Handle CORE "get_skill_details" tool
+                    if (toolCall.tool === 'get_skill_details') {
+                        const skillName = toolCall.args.skill_name;
+                        console.log(`📖 Detailed schema requested for: ${skillName}`);
+                        const details = getToolDescriptionsForSkills(this.skills, [skillName]);
+
+                        const toolResultMsg = details
+                            ? `Full schema for ${skillName}:\n${details}`
+                            : `Skill "${skillName}" not found. Available skills:\n${this.skillSummaries}`;
+
+                        this.history.push({ role: 'assistant', content: assistantText });
+                        this.history.push({ role: 'user', content: toolResultMsg });
+
+                        const followUp = await chat([
+                            { role: 'system', content: finalPrompt },
+                            ...this.history
+                        ], chatOptions);
+
+                        assistantText = followUp.text;
+                        finalTps = followUp.tps;
+                    } else {
+                        this.writeState(toolCall.tool, toolCall.args, cleanMessage);
+                        this.emit('tool_start', { tool: toolCall.tool, args: toolCall.args });
+                        const result = await executeTool(this.skills, toolCall.tool, toolCall.args);
+                        logDebug(`[DEBUG] Tool execution successful. Result: ${JSON.stringify(result)}`);
+                        this.emit('tool_end', { tool: toolCall.tool, result });
+
+                        // Handle mode switch from team-manager
+                        if (result && result.next_mode) {
+                            console.log(`🔄 Tool requested mode switch to: ${result.next_mode}`);
+                            this.setMode(result.next_mode);
+                        }
+
+                        if (result && result.auto_continue) {
+                            autoContinueFlag = true;
+                        }
+
+                        this.clearState();
+
+                        // Check for explicit error return from tool
+                        if (result && result.error) {
+                            const errorId = errorManager.logError(result.error, `Tool call: ${toolCall.tool}`);
+                            // Append Error ID to the result so the agent knows about it
+                            result.error_id = errorId;
+                            result.system_note = `System logged error as ${errorId}. You should verify this error using read_file then fix it.`;
+                        }
+
+                        // Feed tool result back to LLM for natural response
+                        const toolResultMsg = `Tool "${toolCall.tool}" returned:\n${JSON.stringify(result, null, 2)}`;
+                        this.history.push({ role: 'assistant', content: assistantText });
+                        this.history.push({ role: 'user', content: toolResultMsg });
+
+                        const followUp = await chat([
+                            { role: 'system', content: finalPrompt },
+                            ...this.history
+                        ], chatOptions);
+
+                        // Track follow-up quota
+                        if (followUp.usage) {
+                            quotaTracker.deduct(followUp.usage.total_tokens);
+                            this.emit('usage', quotaTracker.getStats());
+                        }
+
+                        assistantText = followUp.text;
+                        finalTps = followUp.tps;
+                    }
+                } catch (e) {
+                    // Error Logging Integration
+                    const errorId = errorManager.logError(e, `Tool call: ${toolCall.tool}`);
+                    assistantText = `⚠️ Tool error (ID: ${errorId}): ${e.message}. I have logged this error.`;
+
+                    break; // Break loop on critical execution error
+                }
+            } // End of if (toolCall)
+        } // End of while loop
 
         // Add response to history
         this.history.push({ role: 'assistant', content: assistantText });
@@ -547,7 +633,13 @@ If you need to use a skill but don't see its parameters, use the following speci
             this.history = this.history.slice(-10);
         }
 
-        this.saveHistory();
+        // If we are auto-continuing (handoff), clear history for the next agent
+        // to prevent context window bloat in 7B models.
+        if (autoContinueFlag) {
+            console.log('🧹 Clearing history for autonomous handoff...');
+            this.history = [];
+        }
+
         this.saveHistory();
         this.emit('message', { role: 'assistant', content: assistantText, model: modelUsed });
 
@@ -555,7 +647,7 @@ If you need to use a skill but don't see its parameters, use the following speci
         // If the assistant says "I have fixed...", we could try to resolve? 
         // For now, rely on manual "resolve_error" tool if we had one, or let user confirm.
 
-        return { text: assistantText, model: modelUsed, tps: finalTps };
+        return { text: assistantText, model: modelUsed, tps: finalTps, auto_continue: autoContinueFlag };
     }
 
     /**
@@ -572,6 +664,10 @@ If you need to use a skill but don't see its parameters, use the following speci
      */
     repairJSON(jsonStr) {
         let repaired = jsonStr;
+
+        // 0. Convert single quotes surrounding string values into double quotes.
+        // This regex looks for `: '...'` and replaces it with `: "..."`
+        repaired = repaired.replace(/:\s*'([^'\\]*(?:\\.[^'\\]*)*)'/g, ': "$1"');
 
         // 1. Strip trailing commas from objects or arrays
         repaired = repaired.replace(/,(\s*[\}\]])/g, '$1');
@@ -725,5 +821,23 @@ If you need to use a skill but don't see its parameters, use the following speci
             }
         } catch (e) { /* ignore */ }
         return null;
+    }
+
+    /**
+     * Get a specialized persona prompt for a team role
+     */
+    getTeamRolePrompt(roleName) {
+        const ROLES_PATH = path.join(__dirname, '..', 'ROLES.md');
+        if (!fs.existsSync(ROLES_PATH)) return "";
+
+        const content = fs.readFileSync(ROLES_PATH, 'utf-8');
+        const sections = content.split('---');
+
+        for (const section of sections) {
+            if (section.includes(`[${roleName}]`) || section.toLowerCase().includes(roleName.toLowerCase())) {
+                return section.trim();
+            }
+        }
+        return "";
     }
 }

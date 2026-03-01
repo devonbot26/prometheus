@@ -1,0 +1,8 @@
+{
+  "id": "ERR-049",
+  "timestamp": "2026-02-28T02:59:35.079Z",
+  "status": "active",
+  "error": "Invalid role \"project_manager\". Valid roles are: architect, coder, designer, qa.",
+  "context": "Tool call: handoff_to",
+  "steps_taken": []
+}

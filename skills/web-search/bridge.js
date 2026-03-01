@@ -1,4 +1,6 @@
 import { spawn } from 'child_process';
+import { prompt } from '../../core/llm.js';
+import { logDebug } from '../../core/logger.js';
 import path from 'path';
 
 /**
@@ -11,7 +13,7 @@ const SEARCH_SCRIPT = path.join(process.env.HOME, 'Documents/projects/my_ai_assi
 export async function web_search(args) {
     const { query } = args;
 
-    console.log(`[DEBUG] Attempting NON-API web search (via my_ai_assistant) for: "${query}"`);
+    logDebug(`[DEBUG] Attempting NON-API web search (via my_ai_assistant) for: "${query}"`);
 
     return new Promise((resolve, reject) => {
         const proc = spawn(VENV_PYTHON, [SEARCH_SCRIPT, query]);

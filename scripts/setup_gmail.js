@@ -5,7 +5,11 @@ import readline from 'readline';
 
 const CREDENTIALS_PATH = path.join(process.cwd(), 'config', 'credentials.json');
 const TOKEN_PATH = path.join(process.cwd(), 'config', 'token.json');
-const SCOPES = ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.compose'];
+const SCOPES = [
+    'https://www.googleapis.com/auth/gmail.readonly',
+    'https://www.googleapis.com/auth/gmail.compose',
+    'https://www.googleapis.com/auth/drive.file'
+];
 
 async function setup() {
     const content = await fs.readFile(CREDENTIALS_PATH);

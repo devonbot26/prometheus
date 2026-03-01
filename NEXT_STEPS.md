@@ -1,28 +1,28 @@
-# Prometheus Restoration Status
+# Prometheus Development Roadmap
 
-## ✅ Completed
-- [x] Analyzed `Migration/` folder contents.
-- [x] Restored Configuration:
-    - `.env` -> Copied to project root.
-    - `credentials.json`, `token.json`, `telegram.json` -> Copied to `config/`.
-- [x] Patched Authentication:
-    - Updated `skills/gmail/bridge.js` to use local `credentials.json` directly (bypassing missing `ai-gmail-agent` dependency).
-- [x] Restored Memory:
-    - Successfully downloaded `history.json` and `agent.db` from Google Drive.
-- [x] Installed Dependencies:
-    - Note: `better-sqlite3` was temporarily removed due to build errors on macOS 15.2 (Sequoia).
+## ✅ Completed Phases (v2.0 Architecture)
+- **Phase 1: Local Model Integration**
+  - Shifted from API-first to local inference using `mlx-community/Qwen2.5-7B-Instruct-4bit` via Llama.cpp/vLLM.
+  - Hardcoded hallucination safety and robust parameter fallback layers.
+- **Phase 2: Core Persona Modules**
+  - Created the multi-agent Orchestrator loop (Lead Researcher, System Admin, Team Manager).
+- **Phase 3: Deep File-System & Memory Linking**
+  - Built the `obsidian-librarian` skill to autonomously manage PARA organization and MOC generation without destroying Git links.
+- **Phase 4: Autonomous Research Chaining**
+  - Successfully orchestrated the `web-scraper`, `reddit-observer`, and `obsidian` skills to autonomously generate GitHub Trending data tables directly into user notebooks.
 
-## ⚠️ Outstanding Issues
-1.  **Missing Brain (Model)**
-    - You must download a GGUF model (e.g., `llama-3-8b-instruct.gguf`) and place it in:
-      `/Users/nelsonwong/Documents/projects/Prometheus/models/`
-2.  **Missing Keys**
-    - update `.env` with your actual `GEMINI_API_KEY` (currently empty).
-    - update `config/telegram.json` with your bot token (currently placeholder).
+## ⚠️ Phase 5: Current & Outstanding Steps
+1. **The "OpenCode" Agent**
+   - Finish the autonomous bug-fixing persona.
+   - Requires hardening of the agent prompts to stop the `nanbeige` (or 7B equivalent) from outputting `<think>` tags internally.
+2. **Twitter/X Integration**
+   - Assess API connectivity for scraping live sentiment beyond Reddit.
+   - Build a potential `twitter-observer` skill for the Lead Researcher to use in correlation generation.
+3. **Cover Letter Pipeline (Career Project)**
+   - Utilize existing Prometheus tools (likely PDF reading and markdown generation) to construct an automated Cover Letter writing pipeline for the user's `Job_Search_Career` MOC.
 
 ## 🚀 How to Launch
-Once the model file is in place, run:
 ```bash
 cd ~/Documents/projects/Prometheus
-npm run start:cli
+node prom.js --cli "Your instruction here..."
 ```

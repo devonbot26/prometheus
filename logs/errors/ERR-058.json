@@ -1,0 +1,8 @@
+{
+  "id": "ERR-058",
+  "timestamp": "2026-03-01T04:27:46.199Z",
+  "status": "active",
+  "error": "Relative path (notePath) is required",
+  "context": "Tool call: obsidian_write_note",
+  "steps_taken": []
+}

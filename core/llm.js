@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import fetch from 'node-fetch';
+import { logDebug, logDebugError } from './logger.js';
 /**
  * Prometheus LLM Interface
  * Routes requests to Gemini (cloud) or Qwen (local) based on availability.
@@ -54,7 +55,7 @@ async function callLocal(messages, options = {}) {
 
             console.log(`[DEBUG] Received response status: ${res.status}`);
             const data = await res.json();
-            console.log('[DEBUG] Successfully parsed response JSON.');
+            logDebug('[DEBUG] Successfully parsed response JSON.');
             const endTime = Date.now();
             const durationS = (endTime - startTime) / 1000;
             const completionTokens = data.usage?.completion_tokens || 0;
@@ -97,25 +98,30 @@ async function callLocal(messages, options = {}) {
 async function callGemini(messages, options = {}) {
     if (!process.env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not set");
 
-    console.log(`[DEBUG] Calling Gemini Cloud (${GEMINI_MODEL})`);
+    const modelToUse = options.cloudModel || GEMINI_MODEL;
+    console.log(`[DEBUG] Calling Gemini Cloud (${modelToUse})`);
 
-    // Gemini 1.5/2.0 Flash expects a specific format for Google AI SDK or standard OpenAI-like REST
-    // Since we use node-fetch, we'll hit the Google AI API directly or via an OpenAI-compatible proxy if configured.
-    // Given the previous setup, we'll assume a standard OpenAI-compatible REST endpoint for simplicity 
-    // or use the specialized Google AI URL.
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${process.env.GEMINI_API_KEY}`;
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+    // Extract system message for Gemini's systemInstruction field
+    const systemMsg = messages.find(m => m.role === 'system');
+    const chatMessages = messages.filter(m => m.role !== 'system');
 
-    const contents = messages.map(m => ({
+    const contents = chatMessages.map(m => ({
         role: m.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: m.content }]
     }));
+
+    const requestBody = { contents };
+    if (systemMsg) {
+        requestBody.systemInstruction = { parts: [{ text: systemMsg.content }] };
+    }
 
     try {
         const res = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents })
+            body: JSON.stringify(requestBody)
         });
 
         if (!res.ok) {
@@ -165,6 +171,17 @@ let currentLocalModel = null; // Track what we think is running
  */
 export async function chat(messages, options = {}) {
     const modelToUse = options.forceModel || modelOverride;
+
+    // 0. Respect explicit overrides
+    if (modelToUse === 'gemini') {
+        const result = await callGemini(messages, options);
+        return { ...result, model: GEMINI_MODEL };
+    }
+
+    if (modelToUse === 'local' && await isLocalAvailable()) {
+        const result = await callLocal(messages, options);
+        return { ...result, model: 'local' };
+    }
 
     // Determine target local model
     const targetLocalModel = options.deepThinking ? LOCAL_MODEL_14B : LOCAL_MODEL_7B;
@@ -222,23 +239,31 @@ export async function chat(messages, options = {}) {
     if (options.deepThinking || options.forceLocal) {
         if (!await isLocalAvailable()) throw new Error('Local LLM server is not ready');
         const result = await callLocal(messages, options);
-        // Derive basename from LLM_MODEL (e.g., 'Nanbeige4.1-3B-8bit' -> 'nanbeige')
-        const modelName = (process.env.LLM_MODEL || 'local').split('/').pop().split('-')[0].toLowerCase();
-        const modelId = options.deepThinking ? `${modelName}-7b-local` : `${modelName}-3b-local`;
+        // Derive a readable model identifier from LLM_MODEL
+        const modelStr = process.env.LLM_MODEL || 'local';
+        const modelBase = modelStr.split('/').pop();
+        const sizeMatch = modelBase.match(/(\\d+[Bb])/);
+        const modelName = modelBase.split('-')[0].toLowerCase();
+        const modelSize = sizeMatch ? sizeMatch[1].toLowerCase() : 'local';
+        const modelId = `${modelName}-${modelSize}-local`;
         return { ...result, model: modelId, tps: result.tps };
     }
 
     // 3. Cloud Usage (Explicit)
     if (options.forceCloud) {
         const result = await callGemini(messages, options);
-        return { ...result, model: GEMINI_MODEL };
+        return { ...result, model: options.cloudModel || GEMINI_MODEL };
     }
 
     // 4. Fallback logic: Try Local first, then Cloud
     if (await isLocalAvailable()) {
         const result = await callLocal(messages, options);
-        const modelName = (process.env.LLM_MODEL || 'local').split('/').pop().split('-')[0].toLowerCase();
-        const modelId = options.deepThinking ? `${modelName}-7b-local` : `${modelName}-3b-local`;
+        const modelStr2 = process.env.LLM_MODEL || 'local';
+        const modelBase2 = modelStr2.split('/').pop();
+        const sizeMatch2 = modelBase2.match(/(\d+[Bb])/);
+        const modelName2 = modelBase2.split('-')[0].toLowerCase();
+        const modelSize2 = sizeMatch2 ? sizeMatch2[1].toLowerCase() : 'local';
+        const modelId = `${modelName2}-${modelSize2}-local`;
         return { ...result, model: modelId, tps: result.tps };
     }
 

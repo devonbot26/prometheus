@@ -1,4 +1,5 @@
 import { exec } from 'child_process';
+import { logDebug } from '../../core/logger.js';
 
 /**
  * Execute a shell command
@@ -11,9 +12,15 @@ export function terminal_run(args) {
             return resolve({ error: "No command provided" });
         }
 
-        console.log(`> Executing: ${args.command}`);
+        // Auto-fix: pyenv on macOS doesn't alias 'python' to 'python3'
+        let command = args.command;
+        if (/^python\s/.test(command) || command === 'python') {
+            command = command.replace(/^python/, 'python3');
+        }
 
-        exec(args.command, { cwd: process.env.HOME }, (error, stdout, stderr) => {
+        logDebug(`> Executing: ${command}`);
+
+        exec(command, { cwd: process.env.HOME }, (error, stdout, stderr) => {
             if (error) {
                 // Return error as result so the LLM sees it
                 return resolve({

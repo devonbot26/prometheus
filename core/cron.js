@@ -1,4 +1,5 @@
 import cron from 'node-cron';
+import { logDebug } from './logger.js';
 
 /**
  * Initializes all background Cron Jobs for Prometheus
@@ -10,7 +11,7 @@ export function initCronJobs(agent, printFn) {
         throw new Error("Cannot init cron jobs without an initialized Agent.");
     }
 
-    console.log('[DEBUG] Initializing Scheduled Cron Jobs...');
+    logDebug('[DEBUG] Initializing Scheduled Cron Jobs...');
 
     // Job 1: Morning Briefing at 8:00 AM every day
     cron.schedule('0 8 * * *', async () => {
@@ -44,5 +45,5 @@ export function initCronJobs(agent, printFn) {
     });
     */
 
-    console.log('[DEBUG] Cron jobs scheduled.');
+    logDebug('[DEBUG] Cron jobs scheduled.');
 }

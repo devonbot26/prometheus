@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
 import crypto from 'crypto';
+import { logDebug } from '../../core/logger.js';
 
 // Default vault path from system config
 // Default vault path relative to user home
@@ -15,6 +16,9 @@ function getVaultPath(providedPath) {
  * Helper to ensure the path is within the vault
  */
 function getSafePath(vaultPath, relativePath) {
+    if (!vaultPath) throw new Error('Vault path is required');
+    if (!relativePath) throw new Error('Relative path (notePath) is required');
+
     const fullPath = path.resolve(vaultPath, relativePath);
     if (!fullPath.startsWith(path.resolve(vaultPath))) {
         throw new Error('Access denied: Path is outside of the vault');
@@ -24,6 +28,7 @@ function getSafePath(vaultPath, relativePath) {
 
 export async function obsidian_list_notes({ vaultPath }) {
     const vPath = getVaultPath(vaultPath);
+    logDebug(`[DEBUG] Obsidian: Listing notes in vault: ${vPath}`);
     if (!fs.existsSync(vPath)) throw new Error(`Vault not found at ${vPath}`);
 
     const notes = [];
@@ -45,7 +50,9 @@ export async function obsidian_list_notes({ vaultPath }) {
 }
 
 export async function obsidian_read_note({ notePath, vaultPath }) {
+    if (!notePath) throw new Error('Parameter "notePath" is required to read a note.');
     const vPath = getVaultPath(vaultPath);
+    logDebug(`[DEBUG] Obsidian: Reading note: ${notePath} in ${vPath}`);
     const fullPath = getSafePath(vPath, notePath);
     if (!fs.existsSync(fullPath)) throw new Error(`Note not found: ${notePath}`);
     return fs.readFileSync(fullPath, 'utf-8');
@@ -70,6 +77,7 @@ export async function obsidian_append_note({ notePath, content, vaultPath }) {
 
 export async function obsidian_search({ query, vaultPath }) {
     const vPath = getVaultPath(vaultPath);
+    logDebug(`[DEBUG] Obsidian: Searching for "${query}" in ${vPath}`);
     // Use ripgrep/grep if available for speed, fallback to manual scan
     try {
         const results = execSync(`grep -rli "${query}" "${vPath}" --include="*.md"`, { encoding: 'utf-8' });

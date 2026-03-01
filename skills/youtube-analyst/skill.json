@@ -1,0 +1,30 @@
+{
+    "name": "youtube-analyst",
+    "description": "Extracts knowledge from YouTube videos by downloading and analyzing transcripts.",
+    "tools": {
+        "fetch_transcript": {
+            "path": "index.js",
+            "function": "fetch_transcript",
+            "description": "Fetches the full transcript of a YouTube video given its URL or video ID.",
+            "parameters": {
+                "url": {
+                    "type": "string",
+                    "description": "The YouTube video URL or ID.",
+                    "required": true
+                }
+            }
+        },
+        "summarize_video": {
+            "path": "index.js",
+            "function": "summarize_video",
+            "description": "Fetches a YouTube video transcript and returns a short, synthesized summary of its key points.",
+            "parameters": {
+                "url": {
+                    "type": "string",
+                    "description": "The YouTube video URL or ID.",
+                    "required": true
+                }
+            }
+        }
+    }
+}

@@ -113,7 +113,11 @@ export function getToolDescriptions(skills) {
         for (const toolName of skill.toolNames) {
             const tool = skill.meta.tools[toolName];
             const params = tool.parameters
-                ? Object.entries(tool.parameters).map(([k, v]) => `${k}: ${v.type}${v.required ? ' (required)' : ''}`).join(', ')
+                ? Object.entries(tool.parameters).map(([k, v]) => {
+                    const type = v.type || (typeof v === 'string' ? 'string' : 'any');
+                    const desc = v.description || (typeof v === 'string' ? v : '');
+                    return `${k}: ${type}${v.required ? ' (required)' : ' (optional)'} - ${desc}`;
+                }).join(', ')
                 : 'none';
             descriptions.push(`- ${toolName}: ${tool.description} [params: ${params}]`);
         }
@@ -127,7 +131,7 @@ export function getToolDescriptions(skills) {
 export function getSkillSummaries(skills) {
     const summaries = [];
     for (const [name, skill] of skills) {
-        summaries.push(`- ${name}: ${skill.meta.description || 'No description'} [tools: ${skill.toolNames.join(', ')}]`);
+        summaries.push(`- **${name}**: ${skill.meta.description || 'No description'} [tools: ${skill.toolNames.join(', ')}]`);
     }
     return summaries.join('\n');
 }
@@ -146,7 +150,11 @@ export function getToolDescriptionsForSkills(skills, skillNames) {
         for (const toolName of skill.toolNames) {
             const tool = skill.meta.tools[toolName];
             const params = tool.parameters
-                ? Object.entries(tool.parameters).map(([k, v]) => `${k}: ${v.type}${v.required ? ' (required)' : ''}`).join(', ')
+                ? Object.entries(tool.parameters).map(([k, v]) => {
+                    const type = v.type || (typeof v === 'string' ? 'string' : 'any');
+                    const desc = v.description || (typeof v === 'string' ? v : '');
+                    return `${k}: ${type}${v.required ? ' (required)' : ' (optional)'} - ${desc}`;
+                }).join(', ')
                 : 'none';
             descriptions.push(`- ${toolName}: ${tool.description} [params: ${params}]`);
         }

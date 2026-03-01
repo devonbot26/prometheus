@@ -22,8 +22,16 @@ const ARCHIVE_DIR = path.join(LOGS_ROOT, 'archive');
 function generateErrorId() {
     const existing = fs.readdirSync(ERROR_LOGS_DIR).filter(f => f.startsWith('ERR-'));
     const archived = fs.readdirSync(ARCHIVE_DIR).filter(f => f.startsWith('ERR-'));
-    const total = existing.length + archived.length;
-    return `ERR-${String(total + 1).padStart(3, '0')}`;
+    const allFiles = [...existing, ...archived];
+    let maxId = 0;
+    for (const f of allFiles) {
+        const match = f.match(/ERR-(\d+)/);
+        if (match) {
+            const num = parseInt(match[1], 10);
+            if (num > maxId) maxId = num;
+        }
+    }
+    return `ERR-${String(maxId + 1).padStart(3, '0')}`;
 }
 
 export const errorManager = {

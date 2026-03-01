@@ -1,19 +1,31 @@
 # 🔥 Project Prometheus — Devon v2.0
 
-Project Prometheus is a custom AI assistant framework designed for maximum user control, privacy, and skill extensibility. It is built to replace the limitations of Clawdbot with a modular, "skill-first" architecture.
+Project Prometheus is a custom AI assistant framework designed for maximum user control, privacy, and skill extensibility. It operates via "skill-first" architecture powered by strictly local LLMs (e.g., Llama.cpp, vLLM with Qwen 2.5 7B).
 
 ## 🚀 Key Features
 
-*   **Privacy-First Intelligence**: Automatically routes sensitive queries (emails, personal data) to a local Qwen 2.5 3B model.
-*   **Dynamic Skill System**: Droppable folder-based skill system.
-*   **Integrated Agents**:
-    *   **Gmail**: Read, summarize, and draft emails (with trust verification).
-    *   **Web Search**: Autonomous web research via DuckDuckGo and Playwright.
-    *   **Weather**: Real-time weather info without API keys.
-    *   **Google Drive**: Autonomous backup and restoration of agent memory and databases.
-    *   **Knowledge Base (RAG)**: Remembers long-term information in a local vector database using `[[Obsidian-style]]` linkage.
-    *   **Self-Coder**: Can write and install its own new skills (with user approval).
-    *   **Collab Board**: Async messaging system for Antigravity <-> Prometheus communication.
+*   **Privacy-First Intelligence**: Operates fully on local hardware. No API keys or cloud dependencies required for core logic.
+*   **Dynamic Skill System**: Droppable folder-based skill system that allows for seamless persona switching (e.g., Librarian, Sys-Admin, Lead Researcher).
+*   **Autonomous Chaining**: Agents like the Lead Researcher can execute multi-step plans (e.g., scraping GitHub, analyzing Reddit sentiment, outputting Markdown) without manual intervention.
+*   **Integrated Memory**: Stores long-term context in a local SQLite/Vector database and directly interfaces with Obsidian Notebooks for human-readable tracking.
+
+## 🤖 16 Specialized Skills
+
+Prometheus is modular. The current `skills/` directory includes:
+- `collab-board`: Async team communication.
+- `gmail`: Email scanning and drafting.
+- `google-drive`: Cloud backup/restore.
+- `knowledge-base`: RAG and system memory.
+- `obsidian` / `obsidian-librarian`: Vault editing, PARA scaffolding, and safe external indexing.
+- `reddit-observer`: Live sentiment scraping.
+- `self-coder`: The ability for the agent to patch its own Node.js code.
+- `sys-admin`: Automated Git syncs and manual backups.
+- `team-manager`: Orchestrates handoffs between persona agents.
+- `terminal`: Direct bash shell execution.
+- `test-skill`: Development sandbox.
+- `weather`: Geographic data gathering.
+- `web-scraper` / `web-search`: Playwright DOM extraction and DuckDuckGo connectivity.
+- `youtube-analyst`: Video transcript analysis.
 
 ## 🏗️ Architecture
 
@@ -22,10 +34,9 @@ Prometheus uses a "Direct Integration" pattern for agents, running them within t
 ```
 prometheus/
 ├── core/             # Orchestrator, LLM interface, Skill loader
-├── skills/           # Modular skills (gmail, web-search, drive, knowledge-base, self-coder, sys-admin, collab-board)
-├── channels/         # User interfaces (CLI, etc.)
-├── scripts/          # Setup and maintenance scripts
-├── messages/         # Shared inbox/outbox for async communication
+├── skills/           # Modular skills (16 active)
+├── channels/         # User interfaces (CLI)
+├── config/           # Local state tracking (DBs, credentials)
 └── package.json
 ```
 
@@ -35,25 +46,15 @@ prometheus/
     ```bash
     npm install
     npx playwright install chromium
-    # Install vector DB dependencies for Knowledge Base
-    npm install vectra @xenova/transformers
     ```
 
-2.  **Configure Environment**:
-    Create a `.env` file with your `GEMINI_API_KEY`.
+2.  **Start Local LLM Server**:
+    Ensure Llama.cpp or LM Studio is running on `localhost:18888`.
 
-3.  **Authorize Google Services**:
+3.  **Launch CLI**:
     ```bash
-    node scripts/setup_drive.js
+    node prom.js --cli
     ```
-
-4.  **Launch**:
-    ```bash
-    npm start
-    ```
-
-## 🧠 Using The New Skills
-
 ### 📚 Knowledge Base (RAG)
 Prometheus can remember facts forever using a local vector database.
 *   **Saving**: "Remember that `[[Project Prometheus]]` uses a local LLM."

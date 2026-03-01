@@ -6,6 +6,7 @@
 import { google } from 'googleapis';
 import fs from 'fs/promises';
 import path from 'path';
+import { logDebugError } from '../../core/logger.js';
 
 const CREDENTIALS_PATH = path.join(process.cwd(), 'config', 'credentials.json');
 const TOKEN_PATH = path.join(process.cwd(), 'config', 'token.json');
@@ -25,7 +26,7 @@ export async function authorize() {
         oAuth2Client.setCredentials(JSON.parse(tokenContent));
         return oAuth2Client;
     } catch (e) {
-        console.error('Auth Error:', e.message);
+        logDebugError('Auth Error:', e.message);
         throw e;
     }
 }
@@ -65,7 +66,7 @@ export async function gmail_scan() {
         return { success: true, count: details.length, messages: details };
 
     } catch (error) {
-        console.error('Gmail Scan Error:', error.message);
+        logDebugError('Gmail Scan Error:', error.message);
         return { success: false, error: error.message };
     }
 }
@@ -102,7 +103,7 @@ export async function gmail_compose(args) {
         return { success: true, messageId: res.data.id };
 
     } catch (error) {
-        console.error('Gmail Compose Error:', error.message);
+        logDebugError('Gmail Compose Error:', error.message);
         return { success: false, error: error.message };
     }
 }

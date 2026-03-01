@@ -3,12 +3,14 @@
     "description": "Get current weather for any city (NO API KEY required)",
     "tools": {
         "get_weather": {
+            "path": "index.js",
+            "function": "get_weather",
             "description": "Get current weather condition, temperature, and 3-day forecast",
             "parameters": {
                 "location": {
                     "type": "string",
-                    "description": "City name (e.g. 'New York', 'London')",
-                    "required": true
+                    "description": "City name (e.g. 'New York', 'London'). If the user does not specify a city, omit this parameter to use the local default (Charlottetown, PE).",
+                    "required": false
                 }
             }
         }

@@ -8,6 +8,7 @@ import { pipeline } from '@xenova/transformers';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { logDebugError } from '../../core/logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INDEX_PATH = path.join(__dirname, 'memory');
@@ -66,7 +67,7 @@ export async function save_knowledge(args) {
         console.log(`💾 Saved knowledge: "${topic ? `[${topic}] ` : ''}${text.substring(0, 50)}..."`);
         return { success: true, message: 'Knowledge saved to vector database.' };
     } catch (e) {
-        console.error('Save error:', e);
+        logDebugError('Save error:', e);
         return { error: e.message };
     }
 }
@@ -95,7 +96,7 @@ export async function query_knowledge(args) {
         console.log(`🔍 Found ${data.length} memories for "${query}"`);
         return { found: true, results: data };
     } catch (e) {
-        console.error('Query error:', e);
+        logDebugError('Query error:', e);
         return { error: e.message };
     }
 }
@@ -123,7 +124,7 @@ export async function record_observation(args) {
         console.log(`📓 Recorded ${type} observation: "${observation.substring(0, 50)}..."`);
         return { success: true, message: 'Observation recorded to long-term memory.' };
     } catch (e) {
-        console.error('Observation error:', e);
+        logDebugError('Observation error:', e);
         return { error: e.message };
     }
 }
@@ -148,7 +149,7 @@ export async function update_project_timeline(args) {
         console.log(`📅 Updated project timeline: PROMETHEUS.md`);
         return { success: true, file: timelinePath };
     } catch (e) {
-        console.error('Timeline error:', e);
+        logDebugError('Timeline error:', e);
         return { error: e.message };
     }
 }

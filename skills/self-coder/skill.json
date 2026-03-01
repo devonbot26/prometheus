@@ -14,9 +14,21 @@
                     "description": "Name of the skill",
                     "required": true
                 },
-                "description": "What the skill does",
-                "code_js": "The JavaScript code for the skill (ESM format)",
-                "tool_spec": "The JSON object describing the tool for skill.json"
+                "description": {
+                    "type": "string",
+                    "description": "What the skill does",
+                    "required": false
+                },
+                "code_js": {
+                    "type": "string",
+                    "description": "The JavaScript code for the skill (ESM format)",
+                    "required": false
+                },
+                "tool_spec": {
+                    "type": "string",
+                    "description": "The JSON object describing the tool for skill.json",
+                    "required": false
+                }
             }
         },
         "consult_senior_dev": {
@@ -58,7 +70,7 @@
         "read_file": {
             "path": "index.js",
             "function": "read_file",
-            "description": "Read the content of a file (limit 500 lines). Useful for debugging.",
+            "description": "Read the content of a file (limit 500 lines). If the exact path is unknown, use 'search_files' first.",
             "parameters": {
                 "file_path": {
                     "type": "string",
@@ -86,6 +98,22 @@
                     "type": "string",
                     "description": "New string to replace the target with",
                     "required": true
+                }
+            }
+        },
+        "search_files": {
+            "path": "index.js",
+            "function": "search_files",
+            "description": "Search for files by pattern or name across ~/Documents. Use this to find files before reading them.",
+            "parameters": {
+                "pattern": {
+                    "type": "string",
+                    "description": "The search pattern (e.g. 'CRAFTING*' or 'index.js')",
+                    "required": true
+                },
+                "search_root": {
+                    "type": "string",
+                    "description": "Optional: Specific directory to search within (defaults to ~/Documents)"
                 }
             }
         }

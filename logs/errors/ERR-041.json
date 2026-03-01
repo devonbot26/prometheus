@@ -1,0 +1,8 @@
+{
+  "id": "ERR-041",
+  "timestamp": "2026-02-27T22:44:59.929Z",
+  "status": "active",
+  "error": "The \"paths[1]\" argument must be of type string. Received undefined",
+  "context": "Tool call: obsidian_read_note",
+  "steps_taken": []
+}

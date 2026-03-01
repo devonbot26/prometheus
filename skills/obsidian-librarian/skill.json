@@ -1,0 +1,89 @@
+{
+    "name": "obsidian-librarian",
+    "description": "Maintains and organizes the Obsidian vault using PARA and Linked Documentation standards. Guidelines: 1. Use PARA (00_Inbox, 10_Projects, 20_Areas, 30_Resources, 40_Archive). 2. Exclude node_modules, .git, build, dist. 3. Prefer Project Nodes (MOCs) over loose scattered notes.",
+    "tools": {
+        "find_scattered_readmes": {
+            "path": "index.js",
+            "function": "find_scattered_readmes",
+            "description": "Scans for generic filenames (README.md) while ignoring build/dist/git folders. Returns absolute paths.",
+            "parameters": {
+                "target_dir": {
+                    "type": "string",
+                    "description": "The directory to scan. Defaults to user Documents."
+                }
+            }
+        },
+        "index_scattered_note": {
+            "path": "index.js",
+            "function": "index_scattered_note",
+            "description": "Adds a permanent link to a scattered README into a Project Node or index file without moving the original file.",
+            "parameters": {
+                "source_path": {
+                    "type": "string",
+                    "description": "Absolute path to the scattered README.",
+                    "required": true
+                },
+                "target_node_path": {
+                    "type": "string",
+                    "description": "Absolute path to the Obsidian project node or index file to receive the link.",
+                    "required": true
+                }
+            }
+        },
+        "audit_vault_structure": {
+            "path": "index.js",
+            "function": "audit_vault_structure",
+            "description": "Ensures PARA folders exist and sweeps loose root notes to 00_Inbox (with rollback log).",
+            "parameters": {
+                "vault_path": {
+                    "type": "string",
+                    "description": "Absolute path to the Obsidian vault."
+                }
+            }
+        },
+        "create_project_node": {
+            "path": "index.js",
+            "function": "create_project_node",
+            "description": "Scaffolds a new high-quality Project Node (MOC) with Dataview-ready frontmatter and technical headers.",
+            "parameters": {
+                "project_name": {
+                    "type": "string",
+                    "description": "The name of the project.",
+                    "required": true
+                },
+                "vault_path": {
+                    "type": "string",
+                    "description": "Absolute path to the Obsidian vault."
+                }
+            }
+        },
+        "revert_librarian_action": {
+            "path": "index.js",
+            "function": "revert_librarian_action",
+            "description": "Undoes the last batch of file moves performed by audit_vault_structure using the rollback log.",
+            "parameters": {
+                "vault_path": {
+                    "type": "string",
+                    "description": "Absolute path to the Obsidian vault."
+                }
+            }
+        },
+        "consolidate_note": {
+            "path": "index.js",
+            "function": "consolidate_note",
+            "description": "LEGACY: Use index_scattered_note for safety. Moves/renames a README into the vault.",
+            "parameters": {
+                "source_path": {
+                    "type": "string",
+                    "description": "Absolute path to source.",
+                    "required": true
+                },
+                "vault_inbox": {
+                    "type": "string",
+                    "description": "Target inbox path.",
+                    "required": true
+                }
+            }
+        }
+    }
+}

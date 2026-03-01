@@ -7,7 +7,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
-import { prompt } from '../../core/llm.js';
+import { prompt, setModelOverride } from '../../core/llm.js';
+import { logDebug, logDebugError } from '../../core/logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SKILLS_ROOT = path.resolve(__dirname, '../../skills');
@@ -32,25 +33,39 @@ function autoCommit(filePath, message) {
 }
 
 export async function create_draft_skill(args) {
-    const { name, description, code_js, tool_spec } = args;
+    const name = args.name || "";
+    const description = args.description || "No description";
+    const code_js = args.code_js || "";
+    const tool_spec = args.tool_spec || null;
 
+    logDebug("[DEBUG] Node 1: Validating inputs for create_draft_skill");
     if (!name || !code_js || !tool_spec) {
-        return { error: 'Name, code_js, and tool_spec are required.' };
+        return {
+            error: "Missing required parameters (name, code_js, tool_spec).",
+            hint: "Please ensure you provide all required arguments for skill creation."
+        };
     }
 
-    // Sanitize name
+    logDebug("[DEBUG] Node 2: Sanitizing skill name");
     const cleanName = name.replace(/[^a-z0-9-]/g, '').toLowerCase();
+    if (!cleanName) {
+        return {
+            error: `Name "${name}" resolved to empty string after sanitization.`,
+            hint: "Use only alphanumeric characters and hyphens for skill names."
+        };
+    }
     const skillDir = path.join(STAGING_ROOT, cleanName);
 
     try {
+        logDebug("[DEBUG] Node 3: Creating staging directory");
         if (!fs.existsSync(skillDir)) {
             fs.mkdirSync(skillDir, { recursive: true });
         }
 
-        // Write index.js
+        logDebug("[DEBUG] Node 3.1: Writing index.js");
         fs.writeFileSync(path.join(skillDir, 'index.js'), code_js);
 
-        // create skill.json
+        logDebug("[DEBUG] Node 3.2: Writing skill.json");
         const skillJson = {
             name: cleanName,
             id: cleanName,
@@ -61,57 +76,90 @@ export async function create_draft_skill(args) {
                 tools: tool_spec
             }
         };
-
         fs.writeFileSync(path.join(skillDir, 'skill.json'), JSON.stringify(skillJson, null, 4));
 
+        logDebug("[DEBUG] Node 4: Auto-committing draft");
         autoCommit(skillDir, `feat(self-coder): draft skill "${cleanName}"`);
 
-        console.log(`📝 Drafted skill "${cleanName}" in staging.`);
         return {
             success: true,
             message: `Skill "${cleanName}" drafted successfully in _staging/ folder. Please review it before installing.`
         };
     } catch (e) {
-        console.error('Draft error:', e);
-        return { error: e.message };
+        logDebugError(`[DEBUG] Terminal: Draft Error: ${e.message}`);
+        return {
+            error: `Draft failed: ${e.message}`,
+            hint: "The staging area may need manual cleanup. Do NOT retry automatically."
+        };
     }
 }
 
 export async function install_skill(args) {
-    const { name } = args;
-    const cleanName = name.replace(/[^a-z0-9-]/g, '').toLowerCase();
+    const name = args.name || "";
+    logDebug("[DEBUG] Node 1: Validating input");
+    if (!name) {
+        return {
+            error: "No skill name provided.",
+            hint: "Provide the name of the skill from the _staging/ directory."
+        };
+    }
 
+    const cleanName = name.replace(/[^a-z0-9-]/g, '').toLowerCase();
     const stagingPath = path.join(STAGING_ROOT, cleanName);
     const installPath = path.join(SKILLS_ROOT, cleanName);
 
-    if (!fs.existsSync(stagingPath)) {
-        return { error: `Skill "${cleanName}" not found in staging.` };
-    }
-
     try {
-        if (fs.existsSync(installPath)) {
-            return { error: `Skill "${cleanName}" already exists in active skills.` };
+        logDebug("[DEBUG] Node 2: Checking staging exists");
+        if (!fs.existsSync(stagingPath)) {
+            return {
+                error: `Skill "${cleanName}" not found in staging.`,
+                hint: "Ensure the skill was first drafted using create_draft_skill."
+            };
         }
 
-        // Move directory
+        logDebug("[DEBUG] Node 3: Checking for duplicate installation");
+        if (fs.existsSync(installPath)) {
+            return {
+                error: `Skill "${cleanName}" already exists in active skills.`,
+                hint: "Cannot overwrite active skills. Delete the folder manually if you wish to reinstall."
+            };
+        }
+
+        logDebug("[DEBUG] Node 4: Moving folder to skills directory");
         fs.renameSync(stagingPath, installPath);
 
-        console.log(`🚀 Installed skill "${cleanName}"! Restart required.`);
+        logDebug("[DEBUG] Node 5: Verification audit");
+        if (!fs.existsSync(installPath)) {
+            return {
+                error: `VERIFICATION FAILED: Folder move failed for "${cleanName}".`,
+                hint: "The filesystem state is inconsistent. Please check manually."
+            };
+        }
+
         return {
             success: true,
             message: `Skill "${cleanName}" installed. Please restart Prometheus to activate it.`
         };
     } catch (e) {
-        console.error('Install error:', e);
-        return { error: e.message };
+        logDebugError(`[DEBUG] Terminal: Install Error: ${e.message}`);
+        return {
+            error: `Install failed: ${e.message}`,
+            hint: "Check _staging/ and /skills/ manually. Do NOT retry automatically."
+        };
     }
 }
 
 export async function consult_senior_dev(args) {
-    const { prompt: userPrompt } = args;
-    console.log('🤖 Consulting Senior Dev (Gemini)...');
+    const userPrompt = args.prompt || "";
+    logDebug("[DEBUG] Node 1: Validating input");
+    if (!userPrompt) {
+        return {
+            error: "No prompt provided for senior dev.",
+            hint: "Describe the skill you want to create in detail."
+        };
+    }
 
-    // System instruction injected into prompt
+    logDebug("[DEBUG] Node 2: Building enhanced prompt for Gemini");
     const enhancedPrompt = `
 You are a Senior Software Engineer acting as a mentor to a junior AI agent.
 Your task is to implement a new skill for the agent based on the request.
@@ -137,9 +185,11 @@ Request: ${userPrompt}
 `;
 
     try {
+        logDebug("[DEBUG] Node 3: Calling Gemini API");
         const result = await prompt(enhancedPrompt, { temperature: 0.2, maxTokens: 4000 });
         let jsonStr = result.text.trim();
 
+        logDebug("[DEBUG] Node 4: Parsing JSON response");
         // Remove markdown code blocks if present
         if (jsonStr.startsWith('```json')) {
             jsonStr = jsonStr.replace(/^```json\s*/, '').replace(/\s*```$/, '');
@@ -147,10 +197,19 @@ Request: ${userPrompt}
             jsonStr = jsonStr.replace(/^```\s*/, '').replace(/\s*```$/, '');
         }
 
-        const skillData = JSON.parse(jsonStr);
+        let skillData;
+        try {
+            skillData = JSON.parse(jsonStr);
+        } catch (parseError) {
+            logDebugError(`[DEBUG] Terminal: JSON Parse Error: ${parseError.message}`);
+            return {
+                error: "Senior Dev returned invalid JSON.",
+                hint: "The AI mentor failed to format its response. Please try rephrasing your request.",
+                raw_response: jsonStr.substring(0, 500)
+            };
+        }
 
-        // Auto-draft the skill
-        console.log(`📝 Auto-drafting skill: ${skillData.name}`);
+        logDebug("[DEBUG] Node 5: Auto-drafting skill");
         const draftResult = await create_draft_skill(skillData);
 
         if (draftResult.success) {
@@ -160,22 +219,30 @@ Request: ${userPrompt}
                 model: result.model
             };
         } else {
-            return { error: `Failed to draft skill: ${draftResult.error}` };
+            return {
+                error: `Auto-draft failed: ${draftResult.error}`,
+                hint: draftResult.hint || "Check staging directory for partial files."
+            };
         }
 
     } catch (e) {
-        return { error: `Senior Dev error: ${e.message}` };
+        logDebugError(`[DEBUG] Terminal: Senior Dev Error: ${e.message}`);
+        return {
+            error: `Senior Dev connection error: ${e.message}`,
+            hint: "Check your GEMINI_API_KEY and internet connection. Do NOT retry automatically."
+        };
     }
 }
 
 export async function switch_model(args) {
-    const { model } = args;
-    console.log(`🧠 Switching model brain to: ${model}`);
+    const model = args.model || "default";
+    logDebug(`[DEBUG] Node 1: Switching model to ${model}`);
 
     try {
         let modelFile = null;
         let responseMsg = "";
 
+        logDebug("[DEBUG] Node 2: Routing to model type");
         if (model === 'local' || model === 'qwen') {
             modelFile = "qwen2.5-7b-instruct-q4_k_m.gguf";
             responseMsg = "Switched to Local (Qwen 7B) model.";
@@ -183,40 +250,60 @@ export async function switch_model(args) {
         } else if (model === 'deepseek' || model === 'thinker') {
             modelFile = "DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf";
             responseMsg = "Switched to DeepSeek-Coder-V2 (MoE 16B). I am now thinking deeply.";
-            setModelOverride('local'); // Still local, but different model
+            setModelOverride('local');
         } else if (model === 'gemini' || model === 'flash') {
             responseMsg = "Switched to Gemini Flash Cloud.";
             setModelOverride('gemini');
         } else {
+            logDebug("[DEBUG] Node 2.1: Defaulting model override");
             setModelOverride(null);
-            responseMsg = "Reset to default behavior.";
+            responseMsg = "Reset to default model behavior.";
         }
 
-        // If we have a model file, tell the parent manager (prom.js) to restart the llama server
+        logDebug("[DEBUG] Node 3: Signalling parent process for reload");
         if (modelFile && process.send) {
             process.send({ type: 'RESTART_LLAMA', model: modelFile });
         }
 
         return { success: true, message: responseMsg };
     } catch (e) {
-        return { error: e.message };
+        logDebugError(`[DEBUG] Terminal: Switch Error: ${e.message}`);
+        return {
+            error: "Model switch failed.",
+            hint: "System will continue with the current active brain. Check your config."
+        };
     }
 }
 
 export async function read_file(args) {
-    const { file_path } = args;
-    const fullPath = path.resolve(process.cwd(), file_path);
+    const filePath = args.file_path || args.path || "";
+    logDebug(`[DEBUG] Node 1: Validating path: ${filePath}`);
 
-    if (!fs.existsSync(fullPath)) {
-        return { error: `File not found: ${file_path}` };
+    if (!filePath) {
+        return {
+            error: "No file path provided.",
+            hint: "Please specify the 'file_path' argument."
+        };
     }
 
+    const fullPath = path.resolve(process.cwd(), filePath);
+
     try {
+        logDebug("[DEBUG] Node 2: Checking file existence");
+        if (!fs.existsSync(fullPath)) {
+            return {
+                error: `File not found: ${filePath}`,
+                hint: "Ensure the path is relative to the project root. Do NOT retry if the path is correct."
+            };
+        }
+
+        logDebug("[DEBUG] Node 3: Reading and truncating");
         const content = fs.readFileSync(fullPath, 'utf-8');
         const lines = content.split('\n');
 
         // Safety: Limit large file reads to first 500 lines to preserve context window
         if (lines.length > 500) {
+            logDebug(`[DEBUG] Node 3.1: File too large (${lines.length} lines), truncating.`);
             return {
                 warning: 'File truncated to first 500 lines.',
                 content: lines.slice(0, 500).join('\n'),
@@ -226,52 +313,195 @@ export async function read_file(args) {
 
         return { content };
     } catch (e) {
-        return { error: `Read error: ${e.message}` };
+        logDebugError(`[DEBUG] Terminal: Read Error: ${e.message}`);
+        return {
+            error: `Read error: ${e.message}`,
+            hint: "Check file permissions or if the file is a binary. Do NOT retry automatically."
+        };
     }
 }
 
 export async function apply_patch(args) {
-    const { file_path, target_content, replacement_content } = args;
-    const fullPath = path.resolve(process.cwd(), file_path);
+    const filePath = args.file_path || "";
+    const targetContent = args.target_content || "";
+    const replacementContent = args.replacement_content || "";
 
-    if (!fs.existsSync(fullPath)) {
-        return { error: `File not found: ${file_path}` };
+    logDebug("[DEBUG] Node 1: Validating inputs");
+    if (!filePath || !targetContent) {
+        return {
+            error: "Missing required parameters (file_path, target_content).",
+            hint: "You must provide both the path and the exact string to replace."
+        };
     }
 
+    const fullPath = path.resolve(process.cwd(), filePath);
+
     try {
+        logDebug("[DEBUG] Node 2: Checking path existence");
+        if (!fs.existsSync(fullPath)) {
+            return {
+                error: `File not found: ${filePath}`,
+                hint: "Check the path and try again if it was a typo."
+            };
+        }
+
+        logDebug("[DEBUG] Node 3: Searching for target content");
         let content = fs.readFileSync(fullPath, 'utf-8');
 
-        // Normalize line endings is hard without a library, so we rely on exact match for now.
-        // We trim only if strict match fails to be helpful.
-        if (content.includes(target_content)) {
-            const newContent = content.replace(target_content, replacement_content);
-            fs.writeFileSync(fullPath, newContent);
+        if (!content.includes(targetContent)) {
+            logDebugError("[DEBUG] Terminal: Patch Target Not Found");
+            return {
+                success: false,
+                error: 'Target content not found in file.',
+                hint: 'Ensure your target_content matches exactly, including whitespace and indentation. Try reading the file again to be sure.'
+            };
+        }
 
-            // Mandatory verification: re-read and confirm
-            const verifyContent = fs.readFileSync(fullPath, 'utf-8');
-            const verified = verifyContent.includes(replacement_content);
+        logDebug("[DEBUG] Node 4: Applying replacement");
+        const newContent = content.replace(targetContent, replacementContent);
+        fs.writeFileSync(fullPath, newContent);
 
-            autoCommit(fullPath, `fix(self-coder): patch ${path.basename(file_path)}`);
+        logDebug("[DEBUG] Node 5: Verification audit (MANDATORY)");
+        const verifyContent = fs.readFileSync(fullPath, 'utf-8');
+        const verified = verifyContent.includes(replacementContent);
 
-            if (!verified) {
-                return {
-                    success: false,
-                    error: 'VERIFICATION FAILED: Patch was written but replacement content not found on re-read. File may be corrupted.'
-                };
+        if (!verified) {
+            logDebugError("[DEBUG] Terminal: Verification Failed");
+            return {
+                success: false,
+                error: 'VERIFICATION FAILED: Patch was written but replacement content not found on re-read.',
+                hint: 'The file might be corrupted or another process modified it. Check manually.'
+            };
+        }
+
+        if (verifyContent.length === 0 && content.length > 0) {
+            logDebugError("[DEBUG] Terminal: Empty File Guard Triggered");
+            return {
+                success: false,
+                error: 'CRITICAL: File is now empty after patch.',
+                hint: 'This looks like data loss. Please undo or restore from backup immediately.'
+            };
+        }
+
+        logDebug("[DEBUG] Node 6: Auto-committing patch");
+        autoCommit(fullPath, `fix(self-coder): patch ${path.basename(filePath)}`);
+
+        return {
+            success: true,
+            verified: true,
+            message: `Successfully patched and verified ${filePath}`
+        };
+    } catch (e) {
+        logDebugError(`[DEBUG] Terminal: Patch Error: ${e.message}`);
+        return {
+            error: `Patch error: ${e.message}`,
+            hint: "Check file permissions. Do NOT retry automatically."
+        };
+    }
+}
+
+/**
+ * Node-based File Discovery Tree
+ */
+export async function search_files(args) {
+    let { pattern, search_root } = args;
+    const defaultRoot = path.join(process.env.HOME, 'Documents');
+    const root = search_root ? path.resolve(process.cwd(), search_root) : defaultRoot;
+
+    logDebug(`[DEBUG] Node 1: Discovery Input: ${pattern} in ${root}`);
+
+    // Node 1: Sanitization & Smart Pattern
+    if (!pattern.includes('*')) {
+        pattern = `*${pattern}*`;
+        logDebug(`[DEBUG] Node 1.1: Auto-expanded to "${pattern}"`);
+    }
+
+    const excludeFlags = [
+        '-type d \\( -name .git -o -name node_modules -o -name _staging -o -name dist -o -name build -o -name .obsidian \\) -prune',
+        '-o -type f'
+    ].join(' ');
+
+    try {
+        // Node 2: Fast Targeted Search
+        logDebug(`[DEBUG] Node 2: Fast Search starting...`);
+        const cmd = `find "${root}" ${excludeFlags} -name "${pattern}" -maxdepth 5 -print | head -n 30`;
+        let results = execSync(cmd, { encoding: 'utf-8', stdio: 'pipe' })
+            .split('\n')
+            .filter(p => p.trim());
+
+        // Node 4: Fuzzy Fallback
+        if (results.length === 0) {
+            logDebug(`[DEBUG] Node 4: No exact matches. Trying case-insensitive fuzzy search...`);
+            const fuzzyCmd = `find "${root}" ${excludeFlags} -iname "${pattern}" -maxdepth 5 -print | head -n 30`;
+            results = execSync(fuzzyCmd, { encoding: 'utf-8', stdio: 'pipe' })
+                .split('\n')
+                .filter(p => p.trim());
+        }
+
+        // Node 3: Result Analysis
+        if (results.length === 0) {
+            // Node 7: Diagnostic Failure
+            logDebug(`[DEBUG] Node 7: Terminal failure for "${pattern}"`);
+            return {
+                error: `No files matching "${pattern}" found in ${root}.`,
+                hint: "Try a broader pattern or check if the file is in a deeper subdirectory."
+            };
+        }
+
+        if (results.length === 1) {
+            // Node 5: Direct Success
+            const filePath = results[0];
+            const relativeToHome = path.relative(process.env.HOME, filePath);
+            logDebug(`[DEBUG] Node 5: Exact match: ${filePath}`);
+
+            let snippet = "";
+            try {
+                snippet = execSync(`head -n 5 "${filePath}"`, { encoding: 'utf-8' });
+            } catch (e) {
+                snippet = "[Error reading snippet]";
             }
 
             return {
                 success: true,
-                verified: true,
-                message: `Successfully patched and verified ${file_path}`
-            };
-        } else {
-            return {
-                success: false,
-                error: 'Target content not found in file. Please ensure exact match including whitespace.'
+                match: `~/${relativeToHome}`,
+                absolute_path: filePath,
+                preview: snippet
             };
         }
+
+        // Node 6: Ambiguity & Summarization
+        if (results.length > 10) {
+            const folderCounts = {};
+            results.forEach(p => {
+                const homeDir = process.env.HOME;
+                const dir = path.dirname(p).replace(homeDir, '~');
+                folderCounts[dir] = (folderCounts[dir] || 0) + 1;
+            });
+
+            const summary = Object.entries(folderCounts)
+                .map(([dir, count]) => `- ${dir} (${count} files)`)
+                .join('\n');
+
+            return {
+                ambiguous: true,
+                message: `Found ${results.length} matches. Here is a summary of locations:`,
+                directory_summary: summary,
+                hint: "Please refine your search pattern or search a specific subdirectory."
+            };
+        }
+
+        return {
+            ambiguous: true,
+            message: `Found ${results.length} potential matches:`,
+            matches: results.map(p => `~/${path.relative(process.env.HOME, p)}`),
+            hint: "Select the correct file from the list above and use 'read_file' with its full path."
+        };
+
     } catch (e) {
-        return { error: `Patch error: ${e.message}` };
+        logDebugError(`[DEBUG] Terminal: Search Error: ${e.message}`);
+        return {
+            error: `Search failed: ${e.message}`,
+            hint: "The directory may be inaccessible or 'find' command failed. Check permissions."
+        };
     }
 }

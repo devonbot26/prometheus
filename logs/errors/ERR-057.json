@@ -1,0 +1,8 @@
+{
+  "id": "ERR-057",
+  "timestamp": "2026-03-01T03:59:44.953Z",
+  "status": "active",
+  "error": "\"team-manager\" is a skill name, not a tool name. Available tools in this skill: handoff_to, delegate_task, get_team_status",
+  "context": "Tool call: team-manager",
+  "steps_taken": []
+}
