@@ -1,4 +1,4 @@
 function main() {
-  console.log('original');
+  console.log('improved');
 }
 main();
