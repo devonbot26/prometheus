@@ -18,6 +18,7 @@ const MAX_AUTO_CONTINUES = 10;
 let autoStep = 0;
 
 const agent = new Agent();
+let lastTps = 0;
 
 // Start background cron scheduler
 initCronJobs(agent, (output) => {
@@ -32,13 +33,19 @@ const rl = readline.createInterface({
 
 console.log('');
 console.log('🔥 Project Prometheus — Devon v2.0');
-console.log('   Type your message. "quit" to exit, "reset" to clear history.');
+console.log('   Type your message. "/?" for help, "quit" to exit.');
 console.log('─'.repeat(50));
 console.log('');
 
 function ask() {
-    const modeTag = agent.activeMode !== 'primary' ? ` [${agent.activeMode}]` : '';
-    rl.question(`You${modeTag}: `, async (input) => {
+    const model = (process.env.LLM_MODEL || 'default').split('/').pop();
+    const mode = agent.activeMode;
+    const tps = lastTps > 0 ? ` | ${lastTps} t/s` : '';
+
+    // Metadata block: [Model | Mode | TPS]
+    const metadata = `\x1b[2m[${model} | ${mode}${tps}]\x1b[0m`;
+
+    rl.question(`${metadata} You: `, async (input) => {
         const trimmed = input.trim();
         logDebug(`[DEBUG] Received input: "${trimmed}"`);
         if (!trimmed) return ask();
@@ -71,6 +78,25 @@ function ask() {
             const args = trimmed.split(' ');
             const cmd = args[0].toLowerCase();
 
+            if (cmd === '/?' || cmd === '/help') {
+                console.log('\n📜 [AVAILABLE COMMANDS]');
+                console.log('─'.repeat(50));
+                console.log('  /mode [type]       Switch mindset: primary, plan, build, chat');
+                console.log('  /model [id]        Switch underlying LLM (e.g. Qwen3.5)');
+                console.log('  /notebook [path]   Open a folder as workspace context');
+                console.log('  /close             Close current notebook');
+                console.log('  /file [path]       Process a long-form prompt from file');
+                console.log('  /clear /reset      Wipe conversation history/memory');
+                console.log('  /debug             Toggle verbose developer logs');
+                console.log('  /think [msg]       Use internal reasoning block');
+                console.log('  /podcast /exam     Specialized notebook skills');
+                console.log('  quit / exit        Shutdown Prometheus and Llama server');
+                console.log('─'.repeat(50));
+                console.log('');
+                ask();
+                return;
+            }
+
             if (cmd === '/notebook') {
                 const path = args[1];
                 agent.setNotebook(path);
@@ -80,11 +106,39 @@ function ask() {
 
             if (cmd === '/mode') {
                 const mode = args[1];
-                if (['primary', 'plan', 'build'].includes(mode)) {
+                if (!mode) {
+                    console.log(`\n🧠 Current Mode: \x1b[1m${agent.activeMode}\x1b[0m`);
+                    console.log(`   Options: primary, plan, build, chat, team-manager\n`);
+                } else if (['primary', 'plan', 'build', 'chat', 'team-manager'].includes(mode)) {
                     agent.setMode(mode);
                     console.log(`🧠 Mode switched to: ${mode}`);
                 } else {
-                    console.log(`Current mode: ${agent.activeMode}. Options: primary, plan, build`);
+                    console.log(`❌ Invalid mode. Options: primary, plan, build, chat, team-manager`);
+                }
+                ask();
+                return;
+            }
+
+            if (cmd === '/model') {
+                const arg = args[1];
+                const MODEL_ID_MAP = {
+                    '1': 'mlx-community/Qwen3.5-4B-4bit',
+                    '2': 'mlx-community/Qwen3.5-9B-4bit'
+                };
+
+                const model = MODEL_ID_MAP[arg] || arg;
+
+                if (!arg) {
+                    console.log(`\n🤖 Current Model: \x1b[1m${process.env.LLM_MODEL || 'default'}\x1b[0m`);
+                    console.log(`   Suggestions:`);
+                    console.log(`    [1] mlx-community/Qwen3.5-4B-4bit (Fastest)`);
+                    console.log(`    [2] mlx-community/Qwen3.5-9B-4bit (Stronger)`);
+                    console.log(`   Usage: /model <id or model_name>\n`);
+                } else {
+                    console.log(`\n🔄 Requesting model switch to: ${model}...\n`);
+                    if (process.send) {
+                        process.send({ type: 'RESTART_LLAMA', model: model });
+                    }
                 }
                 ask();
                 return;
@@ -154,6 +208,7 @@ function ask() {
         }
 
         async function handleResponse(response) {
+            lastTps = response.tps || 0;
             const speedStr = response.tps ? ` (${response.tps} tok/s)` : '';
             if (response.reasoning && response.reasoning !== response.text) {
                 console.log(`\n\x1b[2m[Thinking...]\x1b[0m\n\x1b[2m${response.reasoning}\x1b[0m`);
@@ -167,6 +222,9 @@ function ask() {
                         const handoff = JSON.parse(fs.readFileSync(HANDOFF_PATH, 'utf-8'));
                         const wakeUp = `[SYSTEM] You are now the ${handoff.to}. Your task: ${handoff.context}`;
                         console.log(`\n🤖 Auto-Continue [Step ${autoStep}/${MAX_AUTO_CONTINUES}]: Waking ${handoff.to}...\n`);
+
+                        // Phase 8: Fix CLI Identity Bleed - ensure the agent mode actually switches!
+                        agent.setMode(handoff.to);
 
                         const nextResponse = await agent.process(wakeUp);
                         return handleResponse(nextResponse);

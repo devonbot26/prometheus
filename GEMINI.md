@@ -1,7 +1,9 @@
 ## 🧬 GEP Genes (Shared AI Evolution)
 - [gene_verification_audit](file:///Users/nelsonwong/.config/evomap/assets/gep/genes.json#gene_verification_audit): ALL updates MUST be tested/audited before confirmation.
+- [gene_auto_verify_first](file:///Users/nelsonwong/.config/evomap/assets/gep/genes.json#gene_auto_verify_first): Implementation plans MUST include an automated script or command for verification.
 - [gene_portability_first](file:///Users/nelsonwong/.config/evomap/assets/gep/genes.json#gene_portability_first): Prefer `process.env.HOME` and relative paths.
 - [gene_non_api_first](file:///Users/nelsonwong/.config/evomap/assets/gep/genes.json#gene_non_api_first): Prioritize local, free, non-API solutions.
+- [gene_obsidian_standard](file:///Users/nelsonwong/.config/evomap/assets/gep/genes.json#gene_obsidian_standard): All docs use YAML frontmatter, Wikilinks, and [Category]-[Project]-[Name] naming.
 
 ## Core Protocols & Rules
 - **Agent Decision Trees**: Whenever creating or proposing a new agent, you MUST always design and suggest a specific **Decision Tree** for that agent. This decision tree must be presented to the user for review and approval before implementation.

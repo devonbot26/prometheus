@@ -38,6 +38,88 @@
             "path": "index.js",
             "description": "Provides a summary of each role's current focus and progress.",
             "parameters": {}
+        },
+        "monitor_resources": {
+            "path": "index.js",
+            "description": "Checks system resources (RAM) to decide on concurrency.",
+            "parameters": {}
+        },
+        "set_task_timer": {
+            "path": "index.js",
+            "description": "Sets a timeout for a task to prevent infinite loops or hanging.",
+            "parameters": {
+                "role": {
+                    "type": "string",
+                    "description": "The role being timed."
+                },
+                "timeout_ms": {
+                    "type": "number",
+                    "description": "Timeout in milliseconds."
+                }
+            }
+        },
+        "escalate_to_9b": {
+            "path": "index.js",
+            "description": "Signals that the current task requires a larger model (9B).",
+            "parameters": {
+                "reason": {
+                    "type": "string",
+                    "description": "Reason for escalation."
+                }
+            }
+        },
+        "save_plan": {
+            "path": "index.js",
+            "description": "Parses a user's multi-step plan and saves it persistently. Each step MUST include a task description and the expected assignee role.",
+            "parameters": {
+                "plan_steps": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "step": {
+                                "type": "number"
+                            },
+                            "task": {
+                                "type": "string"
+                            },
+                            "assignee": {
+                                "type": "string",
+                                "description": "The target role for this step (e.g., 'team-coder', 'team-researcher')."
+                            }
+                        },
+                        "required": [
+                            "step",
+                            "task",
+                            "assignee"
+                        ]
+                    },
+                    "description": "An array of objects representing the steps of the plan, each with a numeric ID, task description, and target role."
+                }
+            }
+        },
+        "get_next_step": {
+            "path": "index.js",
+            "description": "Reads the persistent plan to retrieve the next incomplete step.",
+            "parameters": {}
+        },
+        "mark_step_done": {
+            "path": "index.js",
+            "description": "Marks a plan step as completed or failed so the PM can move on.",
+            "parameters": {
+                "step_id": {
+                    "type": "number",
+                    "description": "The numeric ID of the step to update."
+                },
+                "status": {
+                    "type": "string",
+                    "description": "'completed' or 'failed'."
+                },
+                "result": {
+                    "type": "string",
+                    "description": "A brief summary of what happened during the step."
+                }
+            }
         }
     }
 }

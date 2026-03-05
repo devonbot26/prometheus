@@ -6,18 +6,26 @@ import { logDebug, logDebugError } from './logger.js';
  * Routes requests to Gemini (cloud) or Qwen (local) based on availability.
  */
 
-const LOCAL_URL = 'http://127.0.0.1:18888';
+function getLocalUrl() {
+    const port = process.env.LLM_PORT || 18888;
+    return `http://127.0.0.1:${port}`;
+}
 const GEMINI_MODEL = 'gemini-2.0-flash';
 
-const LOCAL_MODEL_7B = process.env.LLM_MODEL || 'mlx-community/Qwen2.5-7B-Instruct-4bit';
-const LOCAL_MODEL_14B = 'mlx-community/Qwen2.5-14B-Instruct-4bit';
+const LOCAL_MODEL_4B = process.env.LLM_MODEL || 'mlx-community/Qwen3.5-4B-4bit';
+const LOCAL_MODEL_9B = 'mlx-community/Qwen3.5-9B-4bit';
 
 /**
  * Check if local LLM server is available
  */
 async function isLocalAvailable() {
     try {
-        const res = await fetch(`${LOCAL_URL}/v1/models`, { signal: AbortSignal.timeout(2000) });
+        // Try the standard /v1/models first
+        let res = await fetch(`${getLocalUrl()}/v1/models`, { signal: AbortSignal.timeout(2000) });
+        if (res.ok) return true;
+
+        // Try the mlx_vlm fallback endpoint
+        res = await fetch(`${getLocalUrl()}/models`, { signal: AbortSignal.timeout(2000) });
         return res.ok;
     } catch {
         return false;
@@ -32,20 +40,30 @@ async function callLocal(messages, options = {}) {
     let attempt = 0;
 
     while (attempt < maxRetries) {
-        console.log(`[DEBUG] Calling ${LOCAL_URL}/v1/chat/completions (Attempt ${attempt + 1}/${maxRetries})`);
+        const targetModel = options.deepThinking ? LOCAL_MODEL_9B : LOCAL_MODEL_4B;
+        console.log(`[DEBUG] Calling ${getLocalUrl()}${targetModel.toLowerCase().includes('vl') || targetModel.toLowerCase().includes('qwen3.5') ? '/chat/completions' : '/v1/chat/completions'} (Attempt ${attempt + 1}/${maxRetries})`);
         try {
             const startTime = Date.now();
-            const res = await fetch(`${LOCAL_URL}/v1/chat/completions`, {
+
+            // VL models launched via start_llama.sh currently use mlx_vlm, which omits the /v1 prefix.
+            const modelNameLower = targetModel.toLowerCase();
+            const isVL = modelNameLower.includes('vl') || modelNameLower.includes('qwen3.5');
+            const endpoint = isVL ? '/chat/completions' : '/v1/chat/completions';
+
+            // mlx_vlm.server strict compatibility dictates omit adapters from generation payload
+            const reqBody = {
+                model: targetModel,
+                messages,
+                temperature: options.temperature ?? 0.0,
+                max_tokens: options.maxTokens ?? 2048,
+                stream: false
+            };
+            if (!isVL) reqBody.adapters = options.adapterPath || null;
+
+            const res = await fetch(`${getLocalUrl()}${endpoint}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    model: options.deepThinking ? LOCAL_MODEL_14B : LOCAL_MODEL_7B,
-                    messages,
-                    adapters: options.adapterPath || null,
-                    temperature: options.temperature ?? 0.0,
-                    max_tokens: options.maxTokens ?? 2048,
-                    stream: false
-                })
+                body: JSON.stringify(reqBody)
             });
 
             if (!res.ok) {
@@ -58,7 +76,11 @@ async function callLocal(messages, options = {}) {
             logDebug('[DEBUG] Successfully parsed response JSON.');
             const endTime = Date.now();
             const durationS = (endTime - startTime) / 1000;
-            const completionTokens = data.usage?.completion_tokens || 0;
+            const usage = data.usage || {};
+            const completionTokens = usage.completion_tokens || usage.output_tokens || 0;
+            const promptTokens = usage.prompt_tokens || usage.input_tokens || 0;
+            const totalTokens = usage.total_tokens || (completionTokens + promptTokens);
+
             const tps = completionTokens > 0 && durationS > 0 ? (completionTokens / durationS).toFixed(1) : 0;
 
             const choice = data.choices?.[0]?.message || {};
@@ -74,7 +96,11 @@ async function callLocal(messages, options = {}) {
             return {
                 text,
                 reasoning,
-                usage: data.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+                usage: {
+                    prompt_tokens: promptTokens,
+                    completion_tokens: completionTokens,
+                    total_tokens: totalTokens
+                },
                 tps: parseFloat(tps)
             };
         } catch (e) {
@@ -154,7 +180,13 @@ export function setModelOverride(model) {
  */
 async function getLocalModels() {
     try {
-        const res = await fetch(`${LOCAL_URL}/v1/models`, { signal: AbortSignal.timeout(2000) });
+        let res = await fetch(`${getLocalUrl()}/v1/models`, { signal: AbortSignal.timeout(2000) });
+
+        // Fallback to mlx_vlm /models endpoint
+        if (!res.ok) {
+            res = await fetch(`${getLocalUrl()}/models`, { signal: AbortSignal.timeout(2000) });
+        }
+
         if (!res.ok) return [];
         const data = await res.json();
         // MLX returns an array of models in data.data
@@ -184,7 +216,7 @@ export async function chat(messages, options = {}) {
     }
 
     // Determine target local model
-    const targetLocalModel = options.deepThinking ? LOCAL_MODEL_14B : LOCAL_MODEL_7B;
+    const targetLocalModel = options.deepThinking ? LOCAL_MODEL_9B : LOCAL_MODEL_4B;
 
     // 1. Check if we need to switch models
     const availableModels = await getLocalModels();
@@ -220,14 +252,17 @@ export async function chat(messages, options = {}) {
 
             console.log('⏳ Waiting for server startup...');
             let attempts = 0;
-            while (attempts < 60) {
+            while (attempts < 120) { // Increased to 2 minutes for 9B model
                 await new Promise(r => setTimeout(r, 1000));
                 if (await isLocalAvailable()) {
-                    await new Promise(r => setTimeout(r, 2000));
-                    console.log('✅ Server online.');
+                    await new Promise(r => setTimeout(r, 2000)); // Additional buffer for memory mapping
+                    console.log('✅ Server online with new model.');
                     break;
                 }
                 attempts++;
+            }
+            if (attempts >= 120) {
+                throw new Error(`Timeout waiting for Llama Server to load model: ${targetLocalModel}`);
             }
         }
     } else {

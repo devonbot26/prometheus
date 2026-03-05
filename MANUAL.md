@@ -30,7 +30,7 @@ The MLX server must be started from the `Prometheus` project directory using the
 ```bash
 # Must be in the Prometheus directory
 ./training_venv/bin/python3 -m mlx_lm.server \
-  --model mlx-community/Qwen2.5-7B-Instruct-4bit \
+  --model mlx-community/Qwen3.5-4B-4bit \
   --port 18888
 ```
 
@@ -79,8 +79,35 @@ top -l 1 -s 0 | grep PhysMem
 ## 🛠️ Configuration Tip
 If you need to change the default model, edit the `LLM_MODEL` variable in your `.env` file:
 ```bash
-LLM_MODEL=mlx-community/Qwen2.5-7B-Instruct-4bit
+LLM_MODEL=mlx-community/Qwen3.5-4B-4bit
 ```
+
+---
+
+## 🧠 VRAM & System Memory Limits (Apple M-Series)
+
+Apple Silicon Macs use a **Unified Memory Architecture (UMA)**. There is no dedicated VRAM; the GPU and CPU share the total system RAM. By default, macOS limits the GPU (the "wired memory") to about 70-75% of total system RAM to reserve enough space for the operating system.
+
+If you need to increase the GPU memory limit to run larger MLX models natively (e.g., Qwen3-9B on 16GB RAM), you can adjust the `iogpu.wired_limit_mb` value via `sysctl`.
+
+### 1. Check Current Limit
+If this returns `0`, your Mac is using the default dynamic Apple percentage:
+```bash
+sysctl -a | grep -i iogpu.wired_limit_mb
+```
+
+### 2. Increase VRAM Limit (Requires `sudo`)
+* **16GB Macs - Safe High Limit (12 GB):** Leaves 4GB for macOS and background apps.
+  ```bash
+  sudo sysctl iogpu.wired_limit_mb=12288
+  ```
+* **16GB Macs - Absolute Max Limit (14 GB):** Use only if you close all other apps (browsers, IDEs).
+  ```bash
+  sudo sysctl iogpu.wired_limit_mb=14336
+  ```
+
+> [!CAUTION]
+> **Never set the limit to exactly match your total physical RAM (e.g., 16384).** Doing so starves macOS core processes and will cause your Mac to hard-freeze or kernel panic immediately.
 
 ---
 

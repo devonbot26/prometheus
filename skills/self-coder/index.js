@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 import { prompt, setModelOverride } from '../../core/llm.js';
 import { logDebug, logDebugError } from '../../core/logger.js';
+import { logAction } from '../../core/action-logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SKILLS_ROOT = path.resolve(__dirname, '../../skills');
@@ -386,6 +387,8 @@ export async function apply_patch(args) {
         logDebug("[DEBUG] Node 6: Auto-committing patch");
         autoCommit(fullPath, `fix(self-coder): patch ${path.basename(filePath)}`);
 
+        logAction("FILE_EDIT", `Applied precise patch to ${filePath}`, "self-coder");
+
         return {
             success: true,
             verified: true,
@@ -503,5 +506,37 @@ export async function search_files(args) {
             error: `Search failed: ${e.message}`,
             hint: "The directory may be inaccessible or 'find' command failed. Check permissions."
         };
+    }
+}
+
+export async function write_file(args) {
+    const filePath = args.file_path || args.path || "";
+    const content = args.content || "";
+    logDebug(`[DEBUG] Node 1: Validating path: ${filePath}`);
+
+    if (!filePath) {
+        return { error: "No file path provided." };
+    }
+
+    const fullPath = path.resolve(process.cwd(), filePath.replace(/^~/, process.env.HOME));
+
+    try {
+        logDebug(`[DEBUG] Node 2: Writing file to ${fullPath}`);
+        const dir = path.dirname(fullPath);
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+        fs.writeFileSync(fullPath, content);
+
+        // Verification
+        const exists = fs.existsSync(fullPath);
+        if (!exists) throw new Error("File not found after write.");
+
+        logAction("FILE_WRITE", `Wrote ${content.length} characters to ${filePath}`, "self-coder");
+
+        return { success: true, message: `Successfully wrote ${content.length} characters to ${filePath}` };
+    } catch (e) {
+        logDebugError(`[DEBUG] Terminal: Write Error: ${e.message}`);
+        return { error: `Write error: ${e.message}` };
     }
 }

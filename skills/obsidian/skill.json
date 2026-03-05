@@ -112,6 +112,22 @@
                     "description": "Absolute path to the vault"
                 }
             }
+        },
+        "obsidian_log_to_daily_note": {
+            "path": "index.js",
+            "function": "obsidian_log_to_daily_note",
+            "description": "Append a bullet point, thought, or log to today's daily note",
+            "parameters": {
+                "content": {
+                    "type": "string",
+                    "description": "The exact bullet point or text to log",
+                    "required": true
+                },
+                "vaultPath": {
+                    "type": "string",
+                    "description": "Absolute path to the vault"
+                }
+            }
         }
     }
 }

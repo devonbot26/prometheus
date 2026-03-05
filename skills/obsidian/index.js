@@ -4,6 +4,14 @@ import { execSync } from 'child_process';
 import crypto from 'crypto';
 import { logDebug } from '../../core/logger.js';
 
+const OBSIDIAN_BIN = fs.existsSync('/Applications/Obsidian.app/Contents/MacOS/Obsidian')
+    ? '"/Applications/Obsidian.app/Contents/MacOS/Obsidian"'
+    : 'obsidian';
+
+function execObsidian(cmd, options = {}) {
+    return execSync(cmd, { ...options, timeout: 5000 });
+}
+
 // Default vault path from system config
 // Default vault path relative to user home
 const DEFAULT_VAULT = path.join(process.env.HOME, 'Documents/Obsidian/My iMac notebooks');
@@ -78,13 +86,42 @@ export async function obsidian_append_note({ notePath, content, vaultPath }) {
 export async function obsidian_search({ query, vaultPath }) {
     const vPath = getVaultPath(vaultPath);
     logDebug(`[DEBUG] Obsidian: Searching for "${query}" in ${vPath}`);
-    // Use ripgrep/grep if available for speed, fallback to manual scan
+
+    // Attempt to use native Obsidian CLI first
     try {
-        const results = execSync(`grep -rli "${query}" "${vPath}" --include="*.md"`, { encoding: 'utf-8' });
-        return results.split('\n').filter(p => p).map(p => path.relative(vPath, p));
+        const results = execObsidian(`${OBSIDIAN_BIN} search query="${query}" format=json`, { encoding: 'utf-8' });
+        const data = JSON.parse(results);
+        return data.map(result => path.relative(vPath, result.path || result));
     } catch (e) {
-        // grep returns non-zero if no matches
-        return [];
+        // Fallback or handle missing CLI
+        if (e.message.includes('command not found') || e.code === 'ENOENT') {
+            logDebug(`[DEBUG] Obsidian CLI not found. Falling back to grep.`);
+            // Fallback to grep
+            try {
+                const results = execSync(`grep -rli "${query}" "${vPath}" --include="*.md"`, { encoding: 'utf-8' });
+                return results.split('\n').filter(p => p).map(p => path.relative(vPath, p));
+            } catch (err) {
+                return [];
+            }
+        }
+        logDebug(`[DEBUG] Obsidian CLI error: ${e.message}`);
+        return { error: `Search failed: ${e.message}` };
+    }
+}
+
+export async function obsidian_log_to_daily_note({ content, vaultPath }) {
+    logDebug(`[DEBUG] Obsidian: Logging to daily note.`);
+    try {
+        // obsidian daily:append content="<text>"
+        // Note: we need to escape quotes in content
+        const escapedContent = content.replace(/"/g, '\\"');
+        execObsidian(`${OBSIDIAN_BIN} daily:append content="${escapedContent}"`, { encoding: 'utf-8' });
+        return { success: true, message: "Successfully appended to today's daily note." };
+    } catch (e) {
+        if (e.message.includes('command not found') || e.code === 'ENOENT') {
+            return { error: "Obsidian CLI not found. Please ask the user to enable it in Obsidian (Settings -> General -> Command line interface)." };
+        }
+        return { error: `Failed to append to daily note: ${e.message}` };
     }
 }
 

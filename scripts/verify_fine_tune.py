@@ -23,4 +23,4 @@ if __name__ == "__main__":
         "check Terminal Skill installed or not",
         "List the Document folder"
     ]
-    test_model("mlx-community/Qwen3-8B-4bit", "adapters", prompts)
+    test_model("mlx-community/Qwen3.5-4B-4bit", "adapters", prompts)

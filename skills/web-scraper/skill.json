@@ -1,17 +1,46 @@
 {
     "name": "web-scraper",
     "version": "1.0.0",
-    "description": "A stealth web scraper that fetches the readable text content of any website by bypassing anti-bot measures.",
+    "description": "A high-performance web extraction suite. Uses Trafilatura logic for fast article reading and Puppeteer for heavy JS rendering.",
     "tools": {
-        "read_webpage": {
+        "read_article": {
             "path": "index.js",
-            "function": "read_webpage",
-            "description": "Navigate to a URL using a stealth headless browser, wait for the page to load, and return the visible text content. Useful for reading articles, bypassing Cloudflare, or getting raw data from dynamic sites.",
+            "function": "read_article",
+            "description": "EXTREMELY FAST. Best for reading blogs, news, documentation, or any static article. Automatically strips ads/junk and squashes tokens for local 7B models.",
             "parameters": {
                 "url": {
                     "type": "string",
-                    "description": "The exact URL of the website to scrape.",
+                    "description": "The exact URL of the article to read.",
                     "required": true
+                }
+            }
+        },
+        "read_webpage": {
+            "path": "index.js",
+            "function": "read_webpage",
+            "description": "HEAVY RENDERER. Use ONLY if 'read_article' fails or for complex SPAs like Twitter, React apps, or interactive dashboards.",
+            "parameters": {
+                "url": {
+                    "type": "string",
+                    "description": "The URL to render.",
+                    "required": true
+                }
+            }
+        },
+        "crawl_site": {
+            "path": "index.js",
+            "function": "crawl_site",
+            "description": "SPIDER. Discover multiple related pages from a single URL via sitemaps or RSS feeds. Returns a summary list of links.",
+            "parameters": {
+                "url": {
+                    "type": "string",
+                    "description": "The base URL or sitemap link.",
+                    "required": true
+                },
+                "maxPages": {
+                    "type": "number",
+                    "description": "Max number of pages to discover (default 5).",
+                    "required": false
                 }
             }
         }

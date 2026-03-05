@@ -20,6 +20,7 @@ import { buildSystemPrompt } from './identity.js';
 import { quotaTracker } from './quota-tracker.js';
 import { errorManager } from './error-manager.js';
 import { logDebug, logDebugError } from './logger.js';
+import { logAction } from './action-logger.js';
 
 logDebug('[DEBUG] Loading core/agent.js...');
 
@@ -72,12 +73,8 @@ export class Agent extends EventEmitter {
     }
 
     setMode(mode) {
-        const VALID_MODES = ['primary', 'plan', 'build', 'team-architect', 'team-coder', 'team-designer', 'team-qa'];
-        if (!VALID_MODES.includes(mode)) return;
-
-        if (!['primary', 'plan', 'build'].includes(mode)) {
-            // Team modes always fallback to primary if no specialized adapter exists,
-            // but we'll use ROLE_MODEL_MAP for routing in process()
+        const STATIC_MODES = ['primary', 'plan', 'build', 'chat'];
+        if (STATIC_MODES.includes(mode) || mode.startsWith('team-')) {
             this.activeMode = mode;
             return;
         }
@@ -334,6 +331,7 @@ export class Agent extends EventEmitter {
      * @param {string} userMessage
      */
     async process(userMessage) {
+        console.log(`\n\n🚨 [DEBUG] process() CALLED! activeMode=${this.activeMode}\n\n`);
         let autoContinueFlag = false;
         // Detect Deep Thinking Command
         let deepThinking = false;
@@ -375,12 +373,24 @@ export class Agent extends EventEmitter {
             }
         }
 
-        const dynamicTools = this.dynamicSkillInjection(cleanMessage);
+        // CHAT MODE: Bypass dynamic tool injection entirely to save tokens and avoid tool hallucinations
+        // TEAM-MANAGER MODE: Only load management tools (strict delegation - Niki must not see execution tools)
+        let dynamicTools;
+        if (this.activeMode === 'chat') {
+            dynamicTools = "";
+        } else if (this.activeMode === 'team-manager') {
+            dynamicTools = getToolDescriptionsForSkills(this.skills, ['team-manager']);
+            console.log('🎯 [PM MODE] Tool isolation active. Niki can only see management tools.');
+        } else {
+            dynamicTools = this.dynamicSkillInjection(cleanMessage);
+        }
 
         let finalPrompt = this.systemPrompt;
 
-        // PAIRED SYSTEM PROMPTS (Reinforce the LoRA behavior)
-        if (this.activeMode === 'plan') {
+        // PAIRED SYSTEM PROMPTS (Reinforce the mode behavior)
+        if (this.activeMode === 'chat') {
+            finalPrompt = "You are in CHAT mode. You are a helpful conversational assistant. Talk naturally with the user. You do NOT have access to tools or skills in this mode, so do not try to use any. Focus on providing high-quality text-based answers.\n\n" + finalPrompt;
+        } else if (this.activeMode === 'plan') {
             finalPrompt = "You are in PLAN mode. You are a senior software architect. Output ONLY Markdown architecture docs, outlines, and plans. Never write code blocks.\n\n" + finalPrompt;
         } else if (this.activeMode === 'build') {
             finalPrompt = "You are in BUILD mode. You are an expert software engineer. Output primarily production-ready code blocks. Explain briefly after.\n\n" + finalPrompt;
@@ -394,6 +404,24 @@ export class Agent extends EventEmitter {
                 try {
                     const handoff = JSON.parse(fs.readFileSync(HANDOFF_PATH, 'utf-8'));
                     finalPrompt += `\n\n## Handoff Context From Previous Agent\n${JSON.stringify(handoff, null, 2)}`;
+
+                    // Auto-Return to PM Logic
+                    if (handoff.return_to && handoff.return_to === 'team-manager') {
+                        finalPrompt += `\n\n> [!CRITICAL INSTRUCTION]\n> When you have completed your objective or encountered an unresolvable error, you MUST yield control back to the Project Manager.\n> **Action Required**: Use the \`handoff_to\` tool with \`role: "team-manager"\` and a \`context\` message detailing your result.\n`;
+                    }
+
+                    // Hard Timer Interrupt Logic
+                    const TIMER_PATH = path.join(__dirname, '..', 'TASK_TIMERS.json');
+                    if (fs.existsSync(TIMER_PATH)) {
+                        try {
+                            const timers = JSON.parse(fs.readFileSync(TIMER_PATH, 'utf-8'));
+                            const myTimer = timers[this.activeMode] || timers[this.activeMode.replace('team-', '')];
+                            if (myTimer && new Date().getTime() > myTimer.expires_at) {
+                                console.log(`🛑 [SYSTEM INTERRUPT] Timer expired for ${this.activeMode}. Injecting forced handoff.`);
+                                finalPrompt += `\n\n# 🛑 [SYSTEM URGENT INTERRUPT]\n> **YOUR TIME LIMIT HAS EXPIRED.**\n> You have been working for ${myTimer.timeout_ms / 60000} minutes and must now check in with the Project Manager.\n> **MANDATORY ACTION**: You MUST immediately call \`handoff_to\` with \`role: "team-manager"\` to report your current partial progress. Do NOT attempt any further tasks.\n`;
+                            }
+                        } catch (e) { /* ignore */ }
+                    }
                 } catch (e) { /* ignore */ }
             }
         }
@@ -431,12 +459,18 @@ If you need to use a skill but don't see its parameters, use the following speci
         logDebug('[DEBUG] Notebook context injection complete.');
 
         const messages = [];
+
+        // MLX Server rejects multiple system messages; convert any history system messages to user
+        const cleanedHistory = this.history.map(msg =>
+            msg.role === 'system' ? { role: 'user', content: `[SYSTEM MESSAGE]\n${msg.content}` } : msg
+        );
+
         if (lowMem || is3B) {
             messages.push({ role: 'system', content: finalPrompt });
-            messages.push(...this.history.slice(-10)); // Moderate context
+            messages.push(...cleanedHistory.slice(-10)); // Moderate context
         } else {
             messages.push({ role: 'system', content: finalPrompt });
-            messages.push(...this.history);
+            messages.push(...cleanedHistory);
         }
         logDebug('[DEBUG] Messages array prepared for LLM call.');
 
@@ -445,14 +479,40 @@ If you need to use a skill but don't see its parameters, use the following speci
             'team-architect': { forceLocal: true },
             'team-coder': { forceLocal: true },
             'team-designer': { forceLocal: true },
-            'team-qa': { forceLocal: true }
+            'team-qa': { forceLocal: true },
+            'team-researcher': { forceLocal: true },
+            'team-manager': { forceLocal: true, deepThinking: true } // PM runs on 9B model
         };
+
+        const roleConfig = ROLE_MODEL_MAP[this.activeMode] ||
+            (this.activeMode.startsWith('team-') ? { forceLocal: true } : {});
+
+        const HANDOFF_PATH = path.join(__dirname, '..', 'HANDOFF.json');
+
+        // Ensure sub-agents default back to 4B unless /think was provided on this specific request
+        let forceDeepThinking = roleConfig.deepThinking || deepThinking;
+
+        // Force 9B for team-manager (Niki)
+        if (this.activeMode === 'team-manager') {
+            forceDeepThinking = true;
+            console.log('🧠 [PM MODE] Niki is running on 9B model.');
+        }
+
+        if (fs.existsSync(HANDOFF_PATH)) {
+            try {
+                const handoff = JSON.parse(fs.readFileSync(HANDOFF_PATH, 'utf-8'));
+                if (handoff.requires_9b) {
+                    console.log(`🚀 [ESCALATION] Handoff requires 9B model. Enabling deepThinking.`);
+                    forceDeepThinking = true;
+                }
+            } catch (e) { /* ignore */ }
+        }
 
         const isPrivate = this.isPrivateRequest(cleanMessage) || !!this.activeNotebook;
 
         const chatOptions = {
             forceLocal: isPrivate || !!this.activeNotebook,
-            deepThinking,
+            deepThinking: forceDeepThinking,
             maxTokens: 2048,
             adapterPath: this.getAdapterPath()
         };
@@ -506,10 +566,26 @@ If you need to use a skill but don't see its parameters, use the following speci
                 return count + (matches ? matches.length : 0);
             }, 0);
 
-            if (junkCount > 5 || assistantText.length > 5000) {
+            if (junkCount > 5) {
                 logDebugError('⚠️ [DEBUG] Gibberish loop detected! Blocking response.');
                 assistantText = "I encountered a processing error (loop detected). How can I help you today?";
                 isSimpleGreeting = true; // Treat as greeting to reset flow
+            } else {
+                // N-gram Repetition Detector (Catches rambling text loops without penalizing long code)
+                const sentences = assistantText.match(/[^.!?\n]+[.!?\n]+/g) || [assistantText];
+                const counts = {};
+                for (const s of sentences) {
+                    const trimmed = s.trim();
+                    if (trimmed.length > 30) {
+                        counts[trimmed] = (counts[trimmed] || 0) + 1;
+                        if (counts[trimmed] > 3) {
+                            logDebugError(`⚠️ [DEBUG] N-gram repetition loop detected! Blocking response. Repeating chunk: "${trimmed.substring(0, 30)}..."`);
+                            assistantText = "I encountered a processing error (repetition loop detected). How can I help you today?";
+                            isSimpleGreeting = true;
+                            break;
+                        }
+                    }
+                }
             }
 
             // If it's a greeting and the model tried to call a tool, strip the JSON to avoid showing it to user
@@ -522,8 +598,9 @@ If you need to use a skill but don't see its parameters, use the following speci
                 }
             }
 
-            // Check if LLM wants to call a tool (Bypass if it's a simple greeting to prevent hallucination)
-            let toolCall = isSimpleGreeting ? null : this.extractToolCall(assistantText);
+            // Check if LLM wants to call a tool (Bypass if it's a simple greeting or in chat mode to prevent hallucination)
+            const isChatMode = this.activeMode === 'chat';
+            let toolCall = (isSimpleGreeting || isChatMode) ? null : this.extractToolCall(assistantText);
 
             if (!toolCall || iterations >= MAX_ITERATIONS) {
                 break;
@@ -551,16 +628,29 @@ If you need to use a skill but don't see its parameters, use the following speci
                         const followUp = await chat([
                             { role: 'system', content: finalPrompt },
                             ...this.history
-                        ], chatOptions);
+                        ], { ...chatOptions, deepThinking: forceDeepThinking });
 
                         assistantText = followUp.text;
                         finalTps = followUp.tps;
                     } else {
+                        if (this.activeMode === 'team-manager' && dynamicTools && !dynamicTools.includes(`- ${toolCall.tool}:`)) {
+                            // Niki is isolated. Stop her from hallucinating execution tools.
+                            throw new Error(`MANAGER PROTOCOL VIOLATION: You are strictly forbidden from using "${toolCall.tool}". You must delegate this task using 'handoff_to' or 'delegate_task'.`);
+                        }
+
                         this.writeState(toolCall.tool, toolCall.args, cleanMessage);
                         this.emit('tool_start', { tool: toolCall.tool, args: toolCall.args });
                         const result = await executeTool(this.skills, toolCall.tool, toolCall.args);
                         logDebug(`[DEBUG] Tool execution successful. Result: ${JSON.stringify(result)}`);
                         this.emit('tool_end', { tool: toolCall.tool, result });
+
+                        // Log major actions
+                        const IGNORED_TOOLS = ['get_task_timer', 'get_team_status', 'monitor_resources', 'obsidian_list_notes', 'read_file', 'list_dir', 'search_files', 'find_code_item'];
+                        if (!IGNORED_TOOLS.includes(toolCall.tool)) {
+                            // stringify args safely for log briefly
+                            const briefArgs = JSON.stringify(toolCall.args).substring(0, 100);
+                            logAction("TOOL_EXECUTION", `Executed tool \`${toolCall.tool}\` - Args: ${briefArgs}`, this.activeMode);
+                        }
 
                         // Handle mode switch from team-manager
                         if (result && result.next_mode) {
@@ -574,6 +664,11 @@ If you need to use a skill but don't see its parameters, use the following speci
 
                         this.clearState();
 
+                        // Check for escalation from tool result
+                        if (result && result.deep_thinking) {
+                            forceDeepThinking = true;
+                        }
+
                         // Check for explicit error return from tool
                         if (result && result.error) {
                             const errorId = errorManager.logError(result.error, `Tool call: ${toolCall.tool}`);
@@ -583,14 +678,45 @@ If you need to use a skill but don't see its parameters, use the following speci
                         }
 
                         // Feed tool result back to LLM for natural response
-                        const toolResultMsg = `Tool "${toolCall.tool}" returned:\n${JSON.stringify(result, null, 2)}`;
+                        const PM_MANAGEMENT_TOOLS = ['save_plan', 'get_next_step', 'mark_step_done', 'set_task_timer', 'get_team_status', 'monitor_resources', 'delegate_task'];
+                        const isPmManagementCall = this.activeMode === 'team-manager' && PM_MANAGEMENT_TOOLS.includes(toolCall.tool);
+
+                        let toolResultMsg = `Tool "${toolCall.tool}" returned:\n${JSON.stringify(result, null, 2)}`;
+
+                        // PM Stepping Loop: nudge Niki with strict state machine transitions
+                        if (isPmManagementCall) {
+                            if (result && result.error) {
+                                toolResultMsg += `\n\n[SYSTEM WARNING] The tool failed. You MUST correct your arguments and try again.`;
+                                console.log(`🔄 [PM STEP] Guiding Niki to retry after error in ${toolCall.tool}...`);
+                            } else {
+                                let nudge = `\n\n[SYSTEM] Tool executed successfully. Do NOT ask the user for confirmation.`;
+                                if (toolCall.tool === 'save_plan') {
+                                    nudge += ` MANDATORY NEXT STEP: You MUST now call get_next_step to load the first pending task.`;
+                                } else if (toolCall.tool === 'get_next_step') {
+                                    if (result && result.plan_status === 'complete') {
+                                        nudge += ` The plan is complete. You may now summarize the final results to the user.`;
+                                    } else {
+                                        nudge += ` MANDATORY NEXT STEP: You MUST now call set_task_timer for the assigned role, or immediately call handoff_to if timer is already set.`;
+                                    }
+                                } else if (toolCall.tool === 'set_task_timer') {
+                                    nudge += ` MANDATORY NEXT STEP: You MUST now call handoff_to to yield control to the assigned worker.`;
+                                } else if (toolCall.tool === 'mark_step_done') {
+                                    nudge += ` MANDATORY NEXT STEP: You MUST now call get_next_step to find the next pending task.`;
+                                } else {
+                                    nudge += ` Continue your Standard Operating Procedure.`;
+                                }
+                                toolResultMsg += nudge;
+                                console.log(`🔄 [PM STEP] Guiding Niki to next state after ${toolCall.tool}...`);
+                            }
+                        }
+
                         this.history.push({ role: 'assistant', content: assistantText });
                         this.history.push({ role: 'user', content: toolResultMsg });
 
                         const followUp = await chat([
                             { role: 'system', content: finalPrompt },
                             ...this.history
-                        ], chatOptions);
+                        ], { ...chatOptions, deepThinking: forceDeepThinking });
 
                         // Track follow-up quota
                         if (followUp.usage) {
@@ -642,6 +768,36 @@ If you need to use a skill but don't see its parameters, use the following speci
 
         this.saveHistory();
         this.emit('message', { role: 'assistant', content: assistantText, model: modelUsed });
+
+        // Phase 7: Forced Agent Auto-Return (Structural Safety Net)
+        // If the agent is in a sub-team mode, didn't use handoff_to (autoContinueFlag is false),
+        // but HANDOFF.json says they should return to team-manager, we force it here.
+        if (!autoContinueFlag && this.activeMode.startsWith('team-') && this.activeMode !== 'team-manager') {
+            const HANDOFF_PATH = path.join(__dirname, '..', 'HANDOFF.json');
+            if (fs.existsSync(HANDOFF_PATH)) {
+                try {
+                    const currentHandoff = JSON.parse(fs.readFileSync(HANDOFF_PATH, 'utf-8'));
+                    if (currentHandoff.return_to === 'team-manager') {
+                        console.log(`\n🛡️ [SAFETY NET] ${this.activeMode} finished without calling handoff_to. Forcing auto-return to team-manager.`);
+
+                        const forcedHandoff = {
+                            from: this.activeMode,
+                            to: 'team-manager',
+                            context: `[AUTOGENERATED RETURN] The ${this.activeMode} agent completed their task and returned this final output: "${assistantText}"`
+                        };
+
+                        fs.writeFileSync(HANDOFF_PATH, JSON.stringify(forcedHandoff, null, 2));
+                        autoContinueFlag = true;
+
+                        // Clear history for autonomous handoff
+                        console.log('🧹 Clearing history for forced autonomous handoff...');
+                        this.history = [];
+                    }
+                } catch (e) {
+                    console.error('⚠️ [SAFETY NET] Failed to parse HANDOFF.json during auto-return check:', e.message);
+                }
+            }
+        }
 
         // Check if we resolved an error (simple heuristic or explicit tool call in future)
         // If the assistant says "I have fixed...", we could try to resolve? 
@@ -827,17 +983,42 @@ If you need to use a skill but don't see its parameters, use the following speci
      * Get a specialized persona prompt for a team role
      */
     getTeamRolePrompt(roleName) {
+        let basePrompt = "";
+
+        // Load Base Definition from ROLES.md
         const ROLES_PATH = path.join(__dirname, '..', 'ROLES.md');
-        if (!fs.existsSync(ROLES_PATH)) return "";
-
-        const content = fs.readFileSync(ROLES_PATH, 'utf-8');
-        const sections = content.split('---');
-
-        for (const section of sections) {
-            if (section.includes(`[${roleName}]`) || section.toLowerCase().includes(roleName.toLowerCase())) {
-                return section.trim();
+        if (fs.existsSync(ROLES_PATH)) {
+            const content = fs.readFileSync(ROLES_PATH, 'utf-8');
+            const sections = content.split('---');
+            for (const section of sections) {
+                // Match exact roles (e.g., [Engine-Coder]) or explicitly defined Modes like `team-manager`
+                const normalizedSection = section.toLowerCase();
+                if (normalizedSection.includes(`mode**: \`team-${roleName.toLowerCase()}\``) ||
+                    normalizedSection.includes(`mode:** \`team-${roleName.toLowerCase()}\``) ||
+                    normalizedSection.match(new RegExp(`\\[.*${roleName}.*\\]`, 'i'))) {
+                    basePrompt = section.trim();
+                    break;
+                }
             }
         }
-        return "";
+
+        // Load Specialized Embedded Prompt if it exists (e.g., Decision Trees)
+        // Check both `team-roleName.md` and `roleName.md`
+        const pathsToTry = [
+            path.join(__dirname, '..', `prompts/team-${roleName}.md`),
+            path.join(__dirname, '..', `prompts/${roleName}.md`),
+            path.join(__dirname, '..', `roles/team-${roleName}.md`),
+            path.join(__dirname, '..', `roles/${roleName}.md`)
+        ];
+
+        for (const promptPath of pathsToTry) {
+            if (fs.existsSync(promptPath)) {
+                const specialContent = fs.readFileSync(promptPath, 'utf-8');
+                basePrompt += `\n\n${specialContent}`;
+                break;
+            }
+        }
+
+        return basePrompt;
     }
 }

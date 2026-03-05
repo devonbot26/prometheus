@@ -84,6 +84,57 @@
                     "required": true
                 }
             }
+        },
+        "set_property": {
+            "path": "index.js",
+            "function": "set_property",
+            "description": "Sets or updates a YAML frontmatter property on a specific note using the native Obsidian CLI. Ensures perfect YAML syntax.",
+            "parameters": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Relative or absolute path to the file.",
+                    "required": true
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Name of the property to set (e.g., 'status').",
+                    "required": true
+                },
+                "value": {
+                    "type": "string",
+                    "description": "Value to set the property to.",
+                    "required": true
+                },
+                "type": {
+                    "type": "string",
+                    "description": "Type of the property (text, list, number, checkbox, date, datetime). Default is 'text'."
+                },
+                "vault_path": {
+                    "type": "string",
+                    "description": "Absolute path to the Obsidian vault."
+                }
+            }
+        },
+        "auto_link_to_hub": {
+            "path": "index.js",
+            "function": "auto_link_to_hub",
+            "description": "Searches the vault for specific files and automatically prepends a Bi-directional link (e.g., Up: [[Hub]]) to all of them, restructuring the Obsidian Graph View.",
+            "parameters": {
+                "search_query": {
+                    "type": "string",
+                    "description": "The exact query to sweep the vault for (e.g., '#obsidian', 'Prometheus framework').",
+                    "required": true
+                },
+                "hub_file_path": {
+                    "type": "string",
+                    "description": "Relative or absolute path to the central Hub or MOC file that should receive the incoming links.",
+                    "required": true
+                },
+                "vault_path": {
+                    "type": "string",
+                    "description": "Absolute path to the Obsidian vault."
+                }
+            }
         }
     }
 }

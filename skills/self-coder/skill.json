@@ -116,6 +116,23 @@
                     "description": "Optional: Specific directory to search within (defaults to ~/Documents)"
                 }
             }
+        },
+        "write_file": {
+            "path": "index.js",
+            "function": "write_file",
+            "description": "Write content to a file. Overwrites if exists. Creates directory if needed.",
+            "parameters": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to the file to write (relative or absolute)",
+                    "required": true
+                },
+                "content": {
+                    "type": "string",
+                    "description": "The full text content to write",
+                    "required": true
+                }
+            }
         }
     }
 }

@@ -74,12 +74,12 @@ if (freeMB < 1000) {
     console.log(`${C.red}⚠️  LOW MEMORY DETECTED: ${freeMB}M free. Prometheus may hang or respond slowly.${C.reset}`);
 
     const currentModel = process.env.LLM_MODEL || '';
-    const isLight = currentModel.includes('3B') || currentModel.toLowerCase().includes('nanbeige');
+    const isHeavy = currentModel.includes('9B') || currentModel.includes('7B');
 
-    if (isLight) {
+    if (isHeavy) {
         console.log(`${C.yellow}💡 Recommendation: Close unnecessary apps (Chrome/Docker) to free up RAM.${C.reset}\n`);
     } else {
-        console.log(`${C.yellow}💡 Recommendation: Close apps or switch to a lighter 3B model.${C.reset}\n`);
+        console.log(`${C.yellow}💡 Recommendation: Consider staying on Qwen3.5 4B for optimal M1 performance.${C.reset}\n`);
     }
 }
 
@@ -94,11 +94,14 @@ function checkServerHealth() {
         fetch(`http://127.0.0.1:${LLAMA_PORT}/v1/models`, { signal: controller.signal })
             .then(res => {
                 clearTimeout(timeoutId);
-                resolve(res.ok);
+                if (res.ok) resolve(true);
+                else {
+                    fetch(`http://127.0.0.1:${LLAMA_PORT}/health`).then(r => resolve(r.ok)).catch(() => resolve(false));
+                }
             })
             .catch(() => {
                 clearTimeout(timeoutId);
-                resolve(false);
+                fetch(`http://127.0.0.1:${LLAMA_PORT}/health`).then(r => resolve(r.ok)).catch(() => resolve(false));
             });
     });
 }
@@ -108,7 +111,11 @@ function checkServerHealth() {
  */
 async function getLoadedModels() {
     try {
-        const res = await fetch(`http://127.0.0.1:${LLAMA_PORT}/v1/models`, { signal: AbortSignal.timeout(2000) });
+        let res = await fetch(`http://127.0.0.1:${LLAMA_PORT}/v1/models`, { signal: AbortSignal.timeout(2000) });
+        if (!res.ok) {
+            // VLM fallback
+            res = await fetch(`http://127.0.0.1:${LLAMA_PORT}/models`, { signal: AbortSignal.timeout(2000) });
+        }
         if (!res.ok) return [];
         const data = await res.json();
         return (data.data || []).map(m => m.id);
@@ -126,9 +133,14 @@ let serverProcess = null;
 function startLlamaServer(modelName) {
     console.log(`${C.yellow}⚠️  Starting Llama Server${modelName ? ' with ' + modelName : ''}...${C.reset}`);
 
+    // Priority: 1. System Python (Homebrew), 2. Explicit Env, 3. Local Venv
     let pythonPath = process.env.PYTHON_PATH;
+    const homebrewPython = '/opt/homebrew/bin/python3';
 
-    // Auto-detect project venv if no explicit path is set
+    if (!pythonPath && existsSync(homebrewPython)) {
+        pythonPath = homebrewPython;
+    }
+
     if (!pythonPath) {
         const localVenv = path.join(process.cwd(), 'training_venv', 'bin', 'python3');
         if (existsSync(localVenv)) {
@@ -138,7 +150,7 @@ function startLlamaServer(modelName) {
         }
     }
 
-    const model = modelName || process.env.LLM_MODEL || 'mlx-community/Qwen2.5-7B-Instruct-4bit';
+    const model = modelName || process.env.LLM_MODEL || 'mlx-community/Qwen3.5-4B-4bit';
     const logFile = createWriteStream('./logs/mlx_server.log', { flags: 'a' });
 
     console.log(`${C.dim}Environment: ${pythonPath}${C.reset}`);
@@ -148,10 +160,8 @@ function startLlamaServer(modelName) {
     const modelLow = model.toLowerCase();
     let adapterDir = null;
 
-    if (modelLow.includes('nanbeige')) {
-        adapterDir = path.join(process.cwd(), 'adapters', 'nanbeige-3b-backup');
-    } else if (modelLow.includes('qwen3-8b')) {
-        adapterDir = path.join(process.cwd(), 'adapters', 'qwen3-8b');
+    if (modelLow.includes('qwen3.5')) {
+        adapterDir = path.join(process.cwd(), 'adapters', 'qwen3.5-4b');
     }
 
     if (adapterDir && existsSync(adapterDir)) {
@@ -161,9 +171,20 @@ function startLlamaServer(modelName) {
         console.log(`${C.yellow}ℹ️ No matching adapters found for ${model}, using base model.${C.reset}`);
     }
 
-    serverProcess = spawn(pythonPath, ['-m', 'mlx_lm.server', '--model', model, '--port', LLAMA_PORT, '--trust-remote-code', ...adapterArgs], {
-        stdio: 'pipe'
-    });
+    // Use the optimized shell script for startup if it exists
+    if (existsSync(STARTUP_SCRIPT)) {
+        console.log(`${C.green}✨ Using startup script: ${STARTUP_SCRIPT}${C.reset}`);
+        serverProcess = spawn('bash', [STARTUP_SCRIPT, model], {
+            stdio: 'pipe',
+            env: { ...process.env, PORT: LLAMA_PORT }
+        });
+    } else {
+        // Fallback to manual spawn if script missing
+        console.log(`${C.dim}Executing manual spawn: ${pythonPath}${C.reset}`);
+        serverProcess = spawn(pythonPath, ['-m', 'mlx_lm', 'server', '--model', model, '--port', LLAMA_PORT, '--trust-remote-code', ...adapterArgs], {
+            stdio: 'pipe'
+        });
+    }
 
     serverProcess.stdout.pipe(logFile);
     serverProcess.stderr.pipe(logFile);
@@ -250,7 +271,7 @@ async function main() {
     // 1. Initial Health Check
     let availableModels = await getLoadedModels();
     const isCli = process.argv.includes('--cli');
-    const DEFAULT_MODEL = process.env.LLM_MODEL || 'mlx-community/Qwen2.5-7B-Instruct-4bit';
+    const DEFAULT_MODEL = process.env.LLM_MODEL || 'mlx-community/Qwen3.5-4B-4bit';
 
     // Retry once if availableModels is empty (server might be warming up)
     if (availableModels.length === 0) {
@@ -277,7 +298,8 @@ async function main() {
         process.stdout.write(`${C.dim}Waiting for server to be ready...${C.reset}`);
         let healthy = false;
         let attempts = 0;
-        while (!healthy && attempts < 90) { // Increased wait for M1 with larger models
+        const maxAttempts = DEFAULT_MODEL.toLowerCase().includes('vl') ? 180 : 120; // Vision models load slower
+        while (!healthy && attempts < maxAttempts) {
             await new Promise(r => setTimeout(r, 1000));
             healthy = await checkServerHealth();
             if (!healthy) process.stdout.write('.');

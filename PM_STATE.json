@@ -1,0 +1,27 @@
+{
+  "steps": [
+    {
+      "id": 1,
+      "description": "Search for the web to find top 5 Github projects",
+      "assignee": "team-researcher",
+      "status": "completed",
+      "result": "Research complete - 5 GitHub projects identified (freeCodeCamp, vuejs/vue, React, Vue.js, Docker)"
+    },
+    {
+      "id": 2,
+      "description": "Write a summary of findings and save as Top-5 Github project.md in test sample folder",
+      "assignee": "team-coder",
+      "status": "pending",
+      "result": null
+    },
+    {
+      "id": 3,
+      "description": "Send an email to wongcw4@gmail.com with the document as attachment",
+      "assignee": "gmail",
+      "status": "pending",
+      "result": null
+    }
+  ],
+  "current_step_id": 2,
+  "started_at": "2026-03-04T19:42:37.061Z"
+}
