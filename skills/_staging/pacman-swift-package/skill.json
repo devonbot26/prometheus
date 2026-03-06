@@ -1,0 +1,18 @@
+{
+    "name": "pacman-swift-package",
+    "id": "pacman-swift-package",
+    "version": "1.0.0",
+    "description": "Swift Package for Pac-Man game using SpriteKit",
+    "toolNames": [
+        "name",
+        "type",
+        "description"
+    ],
+    "meta": {
+        "tools": {
+            "name": "pacman-swift-package",
+            "type": "swift-package",
+            "description": "Creates Swift Package structure for Pac-Man game"
+        }
+    }
+}
