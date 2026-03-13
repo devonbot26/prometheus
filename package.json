@@ -12,7 +12,7 @@
     },
     "dependencies": {
         "@google-cloud/local-auth": "^3.0.1",
-        "@modelcontextprotocol/sdk": "^1.26.0",
+        "@modelcontextprotocol/sdk": "^1.27.1",
         "@mozilla/readability": "^0.6.0",
         "@xenova/transformers": "^2.15.0",
         "better-sqlite3": "^12.6.2",

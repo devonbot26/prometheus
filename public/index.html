@@ -6,6 +6,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Prometheus Dashboard</title>
     <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script>
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: 'dark',
+            securityLevel: 'loose',
+            flowchart: { useMaxWidth: true, htmlLabels: true, curve: 'basis' }
+        });
+    </script>
     <style>
         :root {
             --bg: #0d1117;
@@ -54,14 +64,137 @@
             border-right: 1px solid #30363d;
         }
 
-        #log-panel {
+        #side-panel {
             width: 40%;
+            display: flex;
+            flex-direction: column;
+            border-left: 1px solid #30363d;
+        }
+
+        #thinking-panel {
+            flex: 2;
+            background: #0d1117;
+            color: var(--yellow);
+            overflow-y: auto;
+            padding: 15px;
+            font-size: 0.85rem;
+            line-height: 1.4;
+            border-bottom: 1px solid #30363d;
+            white-space: pre-wrap;
+            position: relative;
+        }
+
+        .mermaid {
+            background: transparent;
+            display: flex;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.5s ease-in;
+        }
+
+        .mermaid svg {
+            max-width: 100%;
+            height: auto;
+        }
+
+        .thought-text {
+            border-bottom: 1px dashed #30363d;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+            display: block;
+        }
+
+        #log-panel {
+            flex: 2;
             background: #000;
             color: var(--green);
             overflow-y: auto;
             padding: 10px;
             font-size: 0.8rem;
-            border-left: 1px solid #30363d;
+        }
+
+        #task-rail {
+            background: var(--term-bg);
+            border-bottom: 1px solid #30363d;
+            padding: 8px 15px;
+            display: flex;
+            gap: 10px;
+            overflow-x: auto;
+            white-space: nowrap;
+            scrollbar-width: thin;
+        }
+
+        #task-rail::-webkit-scrollbar {
+            height: 4px;
+        }
+
+        .task-bubble {
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: #8b949e;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .task-bubble:hover {
+            border-color: var(--blue);
+            color: var(--text);
+        }
+
+        .task-bubble.active {
+            border-color: var(--blue);
+            background: rgba(88, 166, 255, 0.1);
+            color: var(--blue);
+        }
+
+        .task-bubble.success {
+            border-color: var(--green);
+            color: var(--green);
+        }
+
+        .task-bubble.error {
+            border-color: var(--red);
+            color: var(--red);
+        }
+
+        .bubble-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #8b949e;
+        }
+
+        .success .bubble-dot {
+            background: var(--green);
+        }
+
+        .error .bubble-dot {
+            background: var(--red);
+        }
+
+        .active .bubble-dot {
+            background: var(--blue);
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.4;
+            }
+
+            100% {
+                opacity: 1;
+            }
         }
 
         #messages {
@@ -90,6 +223,57 @@
             align-self: flex-start;
             background: var(--term-bg);
             border: 1px solid #30363d;
+            position: relative;
+        }
+
+        .xray-btn {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background: transparent;
+            border: 1px solid #30363d;
+            color: #8b949e;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.65rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            opacity: 0.4;
+        }
+
+        .xray-btn:hover {
+            opacity: 1;
+            border-color: var(--blue);
+            color: var(--blue);
+        }
+
+        .xray-panel {
+            margin-top: 10px;
+            padding: 10px;
+            background: #10141b;
+            border: 1px dashed #30363d;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            display: none;
+            overflow-x: auto;
+            color: var(--text);
+        }
+
+        .xray-panel del {
+            color: var(--red);
+            background: rgba(248, 81, 73, 0.1);
+            text-decoration: line-through;
+            padding: 0 2px;
+        }
+
+        .strip-tag {
+            display: inline-block;
+            background: rgba(88, 166, 255, 0.1);
+            color: var(--blue);
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-size: 0.7rem;
+            margin-right: 5px;
         }
 
         #input-area {
@@ -124,6 +308,206 @@
             border-bottom: 1px solid #333;
             padding-bottom: 2px;
         }
+
+        /* MCP Hub Styles */
+        .tab-btn {
+            background: transparent;
+            color: var(--text);
+            border: 1px solid var(--border, #30363d);
+            padding: 5px 15px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+
+        .tab-btn.active {
+            background: #30363d;
+            font-weight: bold;
+        }
+
+        #mcp-hub-panel,
+        #social-panel,
+        #tv-panel {
+            flex: 1;
+            display: none;
+            padding: 20px;
+            overflow-y: auto;
+            border-right: 1px solid #30363d;
+        }
+
+        .channel-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px;
+            background: rgba(48, 54, 61, 0.4);
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 8px;
+        }
+
+        .channel-item:hover {
+            background: rgba(56, 139, 253, 0.1);
+            border-color: var(--blue);
+        }
+
+        .channel-item.active {
+            background: rgba(56, 139, 253, 0.2);
+            border-color: var(--blue);
+        }
+
+        .channel-logo {
+            width: 30px;
+            height: 20px;
+            object-fit: contain;
+            background: #fff;
+            padding: 2px;
+            border-radius: 2px;
+        }
+
+        .channel-name {
+            font-size: 0.8rem;
+            color: #c9d1d9;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .category-header {
+            font-size: 0.7rem;
+            font-weight: bold;
+            color: var(--blue);
+            margin: 15px 0 8px 5px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-bottom: 1px solid rgba(88, 166, 255, 0.2);
+            padding-bottom: 3px;
+        }
+
+        #tv-search {
+            width: 100%;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            padding: 8px 12px;
+            color: #c9d1d9;
+            font-size: 0.8rem;
+            margin-bottom: 15px;
+            outline: none;
+        }
+
+        #tv-search:focus {
+            border-color: var(--blue);
+            box-shadow: 0 0 0 1px var(--blue);
+        }
+
+        .social-entry {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 10px;
+        }
+
+        .social-time {
+            font-size: 0.75rem;
+            color: #8b949e;
+            margin-bottom: 5px;
+        }
+
+        #social-panel {
+            flex: 1;
+            display: none;
+            padding: 20px;
+            overflow-y: auto;
+            border-right: 1px solid #30363d;
+        }
+
+        .mcp-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .mcp-status {
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+
+        .mcp-online {
+            background: rgba(46, 160, 67, 0.2);
+            color: var(--green);
+            border: 1px solid var(--green);
+        }
+
+        .mcp-offline {
+            background: rgba(139, 148, 158, 0.2);
+            color: #8b949e;
+            border: 1px solid #8b949e;
+        }
+
+        .mcp-error {
+            background: rgba(248, 81, 73, 0.2);
+            color: var(--red);
+            border: 1px solid var(--red);
+        }
+
+        /* Toggle Switch */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #30363d;
+            transition: .4s;
+            border-radius: 24px;
+            border: 1px solid #8b949e;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 3px;
+            bottom: 3px;
+            background-color: var(--text);
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked+.slider {
+            background-color: var(--green);
+            border-color: var(--green);
+        }
+
+        input:checked+.slider:before {
+            transform: translateX(20px);
+            background-color: #fff;
+        }
     </style>
 </head>
 
@@ -131,13 +515,28 @@
     <div id="header">
         <div style="display: flex; align-items: center; gap: 15px;">
             <div>🔥 PROMETHeUS v2.0</div>
-            <div id="status">Idle</div>
+            <div style="margin-left: 20px; display: flex; gap: 5px;">
+                <button class="tab-btn active" onclick="switchTab('chat')">Chat Hub</button>
+                <button class="tab-btn" onclick="switchTab('tv')">📺 Live TV</button>
+                <button class="tab-btn" onclick="switchTab('mcp')">MCP Hub</button>
+            </div>
         </div>
         <div id="quota-monitor" style="display: flex; align-items: center; gap: 15px; font-size: 0.75rem;">
+            <div style="display: flex; align-items: center; gap: 5px;">
+                <span style="color: #8b949e; font-weight: bold;">STATUS:</span>
+                <div id="status"
+                    style="color: var(--green); font-weight: bold; max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    Idle</div>
+            </div>
             <div id="active-model"
                 style="color: var(--blue); font-weight: bold; background: rgba(56, 139, 253, 0.1); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--blue);">
                 --</div>
             <div id="refresh-timer" title="Time until quota reset">--:--:--</div>
+            <div id="memory-indicator"
+                style="display: flex; align-items: center; gap: 5px; background: rgba(0,0,0,0.2); padding: 2px 8px; border-radius: 4px; border: 1px solid #30363d;">
+                <span style="color: #8b949e; font-weight: bold; font-size: 0.7rem;">MEM:</span>
+                <span id="mem-status" style="font-weight: bold; font-size: 0.75rem; color: var(--green);">Healthy</span>
+            </div>
             <div
                 style="width: 150px; height: 10px; background: #30363d; border-radius: 5px; overflow: hidden; border: 1px solid #444;">
                 <div id="fuel-gauge"
@@ -152,11 +551,62 @@
             <div id="messages"></div>
             <div id="input-area">
                 <input type="text" id="msgInput" placeholder="Type a command..." autocomplete="off">
-                <button onclick="send()">Send</button>
+                <button id="sendBtn" onclick="send()">Send</button>
             </div>
         </div>
-        <div id="log-panel">
-            <div class="log-entry">System initialized.</div>
+
+        <div id="mcp-hub-panel">
+            <h2>MCP Servers</h2>
+            <p style="color: #8b949e; margin-top: -10px; margin-bottom: 20px;">Manage active connections to external
+                Model Context Protocol servers.</p>
+            <div id="mcp-list">Loading servers...</div>
+        </div>
+
+        <div id="tv-panel" style="display: none; height: 100%; flex-direction: column; padding: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h2 style="margin:0">Live TV Feed 📺</h2>
+                <div id="tv-status" style="color: #8b949e; font-size: 0.8rem;">Ready</div>
+            </div>
+            <div style="display: flex; gap: 20px; height: calc(100% - 40px);">
+                <div id="tv-main"
+                    style="flex: 3; background: #000; border-radius: 8px; overflow: hidden; position: relative; border: 1px solid #30363d;">
+                    <video id="video-player" controls style="width: 100%; height: 100%; object-fit: contain;"></video>
+                    <div id="video-overlay"
+                        style="position: absolute; top: 10px; left: 10px; padding: 5px 10px; background: rgba(0,0,0,0.7); border-radius: 4px; pointer-events: none; opacity: 0; transition: opacity 0.3s;">
+                        <span id="video-title" style="font-weight: bold; font-size: 0.9rem;"></span>
+                    </div>
+                </div>
+                <div id="tv-sidebar"
+                    style="flex: 1; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding-right: 5px;">
+                    <input type="text" id="tv-search" placeholder="Search channels..." onkeyup="filterChannels()">
+                    <div id="tv-channels" class="channel-list">
+                        <div style="color: #8b949e; font-style: italic;">Loading Channels...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="social-panel">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2>Social Activity 🐦</h2>
+                <div id="twitter-status" class="mcp-status mcp-offline">Checking X API...</div>
+            </div>
+            <div id="social-list">
+                <div style="color: #8b949e; font-style: italic;">No social activity logged yet. Prometheus will post
+                    updates here.</div>
+            </div>
+        </div>
+
+
+        <div id="side-panel">
+            <div id="task-rail"></div>
+            <div id="thinking-panel">
+                <div style="color: #444; font-style: italic;">Prometheus's thoughts will appear here in real-time...
+                </div>
+            </div>
+            <div id="log-panel">
+                <div class="log-entry">System initialized.</div>
+            </div>
         </div>
     </div>
 
@@ -164,6 +614,7 @@
         const socket = io();
         const messagesDiv = document.getElementById('messages');
         const logDiv = document.getElementById('log-panel');
+        const thinkingDiv = document.getElementById('thinking-panel');
         const statusDiv = document.getElementById('status');
         const input = document.getElementById('msgInput');
 
@@ -171,11 +622,213 @@
             log('Connected to Prometheus Core.');
         });
 
+        let thinkingBuffer = '';
+        let terminalBuffer = ''; // For generic output not tied to a tool
+        let intentTrace = null;
+        let commandBlocks = [];
+        let currentCommandId = null;
+        let toolStartTime = null;
+        let toolInterval = null;
+
+        function formatDuration(ms) {
+            const totalSeconds = Math.floor(ms / 1000);
+            const minutes = Math.floor(totalSeconds / 60);
+            const seconds = totalSeconds % 60;
+            return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+
+        socket.on('think_stream', (chunk) => {
+            if (thinkingBuffer === '' && terminalBuffer === '' && commandBlocks.length === 0) thinkingDiv.innerHTML = '';
+            thinkingBuffer += chunk;
+
+            renderUnifiedActivity();
+            thinkingDiv.scrollTop = thinkingDiv.scrollHeight;
+
+            const snippet = thinkingBuffer.slice(-70).replace(/\n/g, ' ').trim();
+            statusDiv.textContent = `Thinking: ${snippet}...`;
+            statusDiv.style.color = 'var(--yellow)';
+        });
+
+        socket.on('terminal_stream', (chunk) => {
+            if (currentCommandId) {
+                const block = commandBlocks.find(b => b.id === currentCommandId);
+                if (block) block.content += chunk;
+            } else {
+                terminalBuffer += chunk;
+            }
+
+            renderUnifiedActivity();
+            thinkingDiv.scrollTop = thinkingDiv.scrollHeight;
+        });
+
+        socket.on('tool_start', (data) => {
+            const id = 'cmd-' + Date.now();
+            currentCommandId = id;
+            commandBlocks.push({
+                id: id,
+                tool: data.tool,
+                args: data.args,
+                content: '',
+                status: 'active'
+            });
+
+            // Start Elapsed Timer
+            toolStartTime = Date.now();
+            if (toolInterval) clearInterval(toolInterval);
+            toolInterval = setInterval(() => {
+                if (toolStartTime) {
+                    const elapsed = formatDuration(Date.now() - toolStartTime);
+                    statusDiv.textContent = `Executing: ${data.tool}... (${elapsed})`;
+                    statusDiv.style.color = 'var(--blue)';
+                }
+            }, 1000);
+
+            renderTaskRail();
+            renderUnifiedActivity();
+        });
+
+        socket.on('tool_end', (data) => {
+            log(`✅ Tool end received: ${data.tool}`);
+            
+            // Clear Elapsed Timer
+            if (toolInterval) {
+                clearInterval(toolInterval);
+                toolInterval = null;
+            }
+            toolStartTime = null;
+            statusDiv.textContent = 'Thinking...'; // Revert to thinking as agent usually summarizes after tool
+
+            const block = commandBlocks.find(b => b.tool === data.tool && b.status === 'active');
+            if (block) {
+                block.status = data.result && data.result.error ? 'error' : 'success';
+                currentCommandId = null;
+                renderTaskRail();
+            }
+        });
+
+        function renderTaskRail() {
+            const rail = document.getElementById('task-rail');
+            rail.innerHTML = '';
+            commandBlocks.forEach(b => {
+                const bubble = document.createElement('div');
+                bubble.className = `task-bubble ${b.status}`;
+                bubble.innerHTML = `<div class="bubble-dot"></div> ${b.tool}`;
+                bubble.onclick = () => {
+                    const el = document.getElementById(b.id);
+                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                };
+                rail.appendChild(bubble);
+            });
+        }
+
+        // --- REPLACED BY CONSOLIDATED VERSION BELOW ---
+        socket.on('intent_trace', (data) => {
+            log('🎯 Intent trace received: ' + data.ranked[0][0]);
+            intentTrace = data;
+            renderUnifiedActivity();
+        });
+
+        function generateMermaidSyntax(data) {
+            let syntax = 'graph LR\n';
+            syntax += '  Q[User Prompt] --- S{Scoring}\n';
+
+            data.ranked.forEach(([skill, score], i) => {
+                const nodeId = skill.replace(/[^a-zA-Z0-9]/g, '_');
+                const isWinner = i < 2;
+                const color = isWinner ? '#2ea043' : '#444';
+                const keywords = data.matchedKeywords[skill];
+                const label = `"${skill.toUpperCase()}<br/>Score: ${score}"`;
+
+                syntax += `  S --- ${nodeId}[${label}]\n`;
+                syntax += `  style ${nodeId} fill:${color},stroke:#30363d,color:#fff\n`;
+
+                if (keywords && keywords.triggers.length > 0) {
+                    syntax += `  ${nodeId} --- T${i}("Triggers: ${keywords.triggers.join(', ')}")\n`;
+                    syntax += `  style T${i} fill:#161b22,stroke:none,font-size:10px\n`;
+                }
+            });
+            return syntax;
+        }
+
+        function renderUnifiedActivity() {
+            // Check if we already have a Mermaid SVG to preserve it
+            const existingSvg = document.querySelector('.mermaid svg');
+            let html = '';
+
+            if (intentTrace) {
+                html += `
+                    <div style="margin-bottom: 25px;">
+                        <div style="color: var(--yellow); font-size: 0.7rem; font-weight: bold; letter-spacing: 0.1rem; margin-bottom: 8px; text-transform: uppercase; opacity: 0.8;">&gt; Intent Decision Map</div>
+                        <div id="mermaid-container" class="mermaid" style="opacity: ${existingSvg ? '1' : '0'}; transition: opacity 0.5s;">${existingSvg ? existingSvg.outerHTML : 'Rendering graph...'}</div>
+                    </div>`;
+            }
+
+            if (thinkingBuffer) {
+                html += `
+                    <div style="margin-bottom: 25px;">
+                        <div style="color: var(--yellow); font-size: 0.7rem; font-weight: bold; letter-spacing: 0.1rem; margin-bottom: 8px; text-transform: uppercase; opacity: 0.8;">&gt; Inner Monologue</div>
+                        <div style="color: var(--yellow); border-left: 3px solid var(--yellow); padding-left: 15px; font-style: italic; opacity: 0.95; white-space: pre-wrap; word-break: break-word; line-height: 1.5; font-size: 0.95rem;">${thinkingBuffer}</div>
+                    </div>`;
+            }
+
+            commandBlocks.forEach(b => {
+                const color = b.status === 'error' ? 'var(--red)' : '#00ff00';
+                html += `
+                    <div id="${b.id}" style="margin-bottom: 20px;">
+                        <div style="color: ${color}; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.1rem; margin-bottom: 8px; text-transform: uppercase; opacity: 0.8;">&gt; ${b.tool} ${b.status === 'active' ? '(RUNNING...)' : ''}</div>
+                        <div style="color: ${color}; font-family: 'Courier New', monospace; background: rgba(0,0,0,0.4); padding: 15px; border-radius: 6px; border: 1px solid ${color}33; box-shadow: inset 0 0 20px ${color}0D; line-height: 1.4; overflow-x: auto; font-size: 0.9rem; white-space: pre-wrap;">${b.content || 'Awaiting output...'}</div>
+                    </div>`;
+            });
+
+            if (terminalBuffer) {
+                html += `
+                    <div>
+                        <div style="color: #00ff00; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.1rem; margin-bottom: 8px; text-transform: uppercase; opacity: 0.8;">&gt; System Output</div>
+                        <div style="color: #00ff00; font-family: 'Courier New', monospace; background: rgba(0,0,0,0.4); padding: 15px; border-radius: 6px; border: 1px solid rgba(0,255,0,0.2); box-shadow: inset 0 0 20px rgba(0,255,0,0.05); line-height: 1.4; overflow-x: auto; font-size: 0.9rem; white-space: pre-wrap;">${terminalBuffer}</div>
+                    </div>`;
+            }
+            thinkingDiv.innerHTML = html || '<div style="color: #444; font-style: italic; text-align: center; margin-top: 50px;">Awaiting activity...</div>';
+
+            // If we didn't have an existing SVG but have intentTrace, trigger re-render
+            if (intentTrace && !existingSvg) {
+                setTimeout(triggerMermaidRender, 50);
+            }
+        }
+
+        function triggerMermaidRender() {
+            const graphDiv = document.querySelector('.mermaid');
+            if (graphDiv && intentTrace) {
+                const syntax = generateMermaidSyntax(intentTrace);
+                mermaid.render('graph-' + Math.floor(Math.random() * 10000), syntax).then(({ svg }) => {
+                    graphDiv.innerHTML = svg;
+                    graphDiv.style.opacity = 1;
+                    log('✅ Intent Map rendered');
+                }).catch(err => {
+                    log('❌ Mermaid Error: ' + err.message);
+                    console.error(err);
+                });
+            }
+        }
+
         socket.on('status', (msg) => {
             statusDiv.textContent = msg;
-            if (msg === 'Thinking...') statusDiv.style.color = 'var(--yellow)';
-            else if (msg === 'Idle') statusDiv.style.color = 'var(--green)';
-            else statusDiv.style.color = 'var(--blue)';
+            const btn = document.getElementById('sendBtn');
+
+            if (msg.startsWith('Thinking') || msg.startsWith('Queued')) {
+                statusDiv.style.color = 'var(--yellow)';
+                if (btn) {
+                    btn.textContent = 'Stop';
+                    btn.style.background = 'var(--red)';
+                }
+            } else {
+                if (msg === 'Idle') statusDiv.style.color = 'var(--green)';
+                else statusDiv.style.color = 'var(--blue)';
+                
+                if (btn) {
+                    btn.textContent = 'Send';
+                    btn.style.background = 'var(--blue)';
+                }
+            }
         });
 
         socket.on('log', (msg) => {
@@ -186,8 +839,41 @@
             updateQuota(stats);
         });
 
+        socket.on('memory_pressure', (data) => {
+            const memStatusDiv = document.getElementById('mem-status');
+            const indicator = document.getElementById('memory-indicator');
+
+            memStatusDiv.textContent = data.state.toUpperCase() + ` (${data.freeMB}MB)`;
+
+            if (data.state === 'critical') {
+                memStatusDiv.style.color = 'var(--red)';
+                indicator.style.borderColor = 'var(--red)';
+                log(`🚨 CRITICAL MEMORY PRESSURE (${data.freeMB}MB). History pruned.`);
+            } else if (data.state === 'pressure') {
+                memStatusDiv.style.color = 'var(--yellow)';
+                indicator.style.borderColor = 'var(--yellow)';
+                log(`⚠️ Memory Pressure Detected (${data.freeMB}MB).`);
+            } else {
+                memStatusDiv.style.color = 'var(--green)';
+                indicator.style.borderColor = '#30363d';
+                log(`✅ Memory recovered.`);
+            }
+        });
+
+        socket.on('disconnect', () => {
+            statusDiv.textContent = 'Disconnected';
+            statusDiv.style.color = 'var(--red)';
+            const btn = document.getElementById('sendBtn');
+            if (btn) {
+                btn.textContent = 'Reconnect';
+                btn.style.background = 'var(--red)';
+                btn.onclick = () => window.location.reload();
+            }
+            log('❌ Lost connection to Prometheus server.');
+        });
+
         socket.on('message', (data) => {
-            addMessage(data.role, data.content);
+            addMessage(data.role, data.content, data.rawContent, data.strips);
             if (data.model) {
                 document.getElementById('active-model').textContent = data.model;
             }
@@ -198,10 +884,42 @@
             history.forEach(h => addMessage(h.role, h.content));
         });
 
+        socket.on('tweet_posted', (tweet) => {
+            const list = document.getElementById('social-list');
+            // Remove placeholder if it exists
+            if (list.querySelector('div[style*="italic"]')) list.innerHTML = '';
+
+            const entry = document.createElement('div');
+            entry.className = 'social-entry';
+            entry.innerHTML = `
+                <div class="social-time">${tweet.time}</div>
+                <div style="margin-bottom: 10px;">${tweet.text}</div>
+                <a href="${tweet.url}" target="_blank" style="color: var(--blue); font-size: 0.8rem; text-decoration: none;">View on X ↗</a>
+            `;
+            list.prepend(entry);
+        });
+
         function send() {
+            const btn = document.getElementById('sendBtn');
+            if (btn && btn.textContent === 'Stop') {
+                socket.emit('stop');
+                return;
+            }
+
             const text = input.value.trim();
             if (!text) return;
-            // Optimistic update handled by server echo for now to keep sync simple
+
+            // Clear buffers ONLY if we are starting fresh (not queuing)
+            if (btn && btn.textContent !== 'Stop') {
+                thinkingBuffer = '';
+                terminalBuffer = '';
+                intentTrace = null;
+                commandBlocks = [];
+                currentCommandId = null;
+                document.getElementById('task-rail').innerHTML = '';
+                renderUnifiedActivity();
+            }
+
             socket.emit('message', text);
             input.value = '';
         }
@@ -210,21 +928,85 @@
             if (e.key === 'Enter') send();
         });
 
-        function addMessage(role, text) {
+        function addMessage(role, text, raw = null, strips = []) {
             const div = document.createElement('div');
             div.className = `msg ${role}`;
 
-            // Allow basic markdown-like checks (very simple)
+            const urlRegex = /(https?:\/\/[^\s<]+)/g;
+            const mdLinkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+
+            const formatText = (t) => {
+                if (!t) return '';
+                let safeText = t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+
+                // 1. Hide Markdown links
+                const mdLinks = [];
+                safeText = safeText.replace(mdLinkRegex, (match, label, url) => {
+                    mdLinks.push(`<a href="${url}" target="_blank" style="color: var(--blue); text-decoration: underline;">${label}</a>`);
+                    return `__MD_LINK_${mdLinks.length - 1}__`;
+                });
+
+                // 2. Replace plain URLs
+                safeText = safeText.replace(urlRegex, (match) => {
+                    return `<a href="${match}" target="_blank" style="color: var(--blue); text-decoration: underline;">${match}</a>`;
+                });
+
+                // 3. Restore Markdown links
+                mdLinks.forEach((link, i) => {
+                    safeText = safeText.replace(`__MD_LINK_${i}__`, link);
+                });
+
+                return safeText;
+            };
+
+            // Main Content Rendering
             if (text.includes('```')) {
                 const parts = text.split('```');
                 let html = '';
                 parts.forEach((part, i) => {
-                    if (i % 2 === 1) html += `<pre><code>${part}</code></pre>`;
-                    else html += part.replace(/\n/g, '<br>');
+                    if (i % 2 === 1) html += `<pre style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 4px; overflow-x: auto;"><code>${part}</code></pre>`;
+                    else html += formatText(part);
                 });
                 div.innerHTML = html;
             } else {
-                div.textContent = text;
+                div.innerHTML = formatText(text);
+            }
+
+            // X-Ray Insight for Assistant
+            if (role === 'assistant' && raw && raw !== text) {
+                const xrayBtn = document.createElement('button');
+                xrayBtn.className = 'xray-btn';
+                xrayBtn.innerHTML = '👁️ X-Ray';
+                div.appendChild(xrayBtn);
+
+                const xrayPanel = document.createElement('div');
+                xrayPanel.className = 'xray-panel';
+
+                let highlighted = raw;
+                // Simple highlight for strips
+                if (strips && strips.length > 0) {
+                    strips.forEach(s => {
+                        highlighted = highlighted.replace(s, `<del>${s}</del>`);
+                    });
+                }
+
+                xrayPanel.innerHTML = `
+                    <div style="color: var(--blue); font-size: 0.65rem; font-weight: bold; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05rem;">Sanitization Trace</div>
+                    <div style="margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 5px;">
+                        ${(strips || []).map(s => `<span class="strip-tag">${s.length > 15 ? s.substring(0, 12) + '...' : s}</span>`).join('')}
+                    </div>
+                    <div style="white-space: pre-wrap; font-family: monospace; line-height: 1.4;">${highlighted.replace(/\n/g, '<br>')}</div>
+                `;
+                div.appendChild(xrayPanel);
+
+                xrayBtn.onclick = () => {
+                    const isVisible = xrayPanel.style.display === 'block';
+                    xrayPanel.style.display = isVisible ? 'none' : 'block';
+                    xrayBtn.style.opacity = isVisible ? '0.4' : '1';
+                    xrayBtn.style.background = isVisible ? 'transparent' : 'rgba(88, 166, 255, 0.1)';
+                    xrayBtn.style.color = isVisible ? '#8b949e' : 'var(--blue)';
+                    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                };
             }
 
             messagesDiv.appendChild(div);
@@ -266,6 +1048,192 @@
             };
             tick();
             window.quotaInterval = setInterval(tick, 1000);
+        }
+
+        // --- MCP Hub Logic ---
+        function switchTab(tab) {
+            // Cleanup TV if moving AWAY from it
+            const currentTab = document.querySelector('.tab-btn.active');
+            if (currentTab && currentTab.innerText.includes('Live TV') && tab !== 'tv') {
+                stopTV();
+            }
+
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('chat-panel').style.display = tab === 'chat' ? 'flex' : 'none';
+            document.getElementById('mcp-hub-panel').style.display = tab === 'mcp' ? 'block' : 'none';
+            document.getElementById('tv-panel').style.display = tab === 'tv' ? 'flex' : 'none';
+            if (document.getElementById('side-panel')) {
+                document.getElementById('side-panel').style.display = tab === 'chat' ? 'flex' : 'none';
+            }
+
+            if (tab === 'chat') {
+                document.querySelector('.tab-btn[onclick="switchTab(\'chat\')"]').classList.add('active');
+            } else if (tab === 'mcp') {
+                document.querySelector('.tab-btn[onclick="switchTab(\'mcp\')"]').classList.add('active');
+                loadMcpServers();
+            } else if (tab === 'tv') {
+                document.querySelector('.tab-btn[onclick="switchTab(\'tv\')"]').classList.add('active');
+                loadTVChannels();
+            }
+        }
+
+        let hls = null;
+        function loadTVChannels() {
+            const container = document.getElementById('tv-channels');
+            if (container.children.length > 2 && !container.innerHTML.includes('Loading')) return;
+
+            fetch('/api/tv/channels')
+                .then(r => r.json())
+                .then(groups => {
+                    container.innerHTML = '';
+                    groups.forEach(group => {
+                        const header = document.createElement('div');
+                        header.className = 'category-header';
+                        header.innerText = group.category;
+                        container.appendChild(header);
+
+                        group.channels.forEach(ch => {
+                            const div = document.createElement('div');
+                            div.className = 'channel-item';
+                            div.innerHTML = `
+                                <img src="${ch.logo || ''}" class="channel-logo" onerror="this.src='https://i.imgur.com/koFYddE.png'">
+                                <span class="channel-name">${ch.name}</span>
+                            `;
+                            div.onclick = (e) => playChannel(ch, e.currentTarget);
+                            container.appendChild(div);
+                        });
+                    });
+                })
+                .catch(err => {
+                    container.innerHTML = `<div style="color: var(--red)">Error: ${err.message}</div>`;
+                });
+        }
+
+        function filterChannels() {
+            const q = document.getElementById('tv-search').value.toLowerCase();
+            const items = document.querySelectorAll('.channel-item');
+            items.forEach(el => {
+                const name = el.querySelector('.channel-name').innerText.toLowerCase();
+                el.style.display = name.includes(q) ? 'flex' : 'none';
+            });
+
+            // Also hide headers if they have no visible items after them
+            const headers = document.querySelectorAll('.category-header');
+            headers.forEach(h => {
+                let sibling = h.nextElementSibling;
+                let hasVisible = false;
+                while (sibling && sibling.classList.contains('channel-item')) {
+                    if (sibling.style.display !== 'none') {
+                        hasVisible = true;
+                        break;
+                    }
+                    sibling = sibling.nextElementSibling;
+                }
+                h.style.display = hasVisible || q === '' ? 'block' : 'none';
+            });
+        }
+
+        function stopTV() {
+            const video = document.getElementById('video-player');
+            if (video) {
+                video.pause();
+                video.src = '';
+                video.load();
+            }
+            if (hls) {
+                hls.stopLoad();
+                hls.destroy();
+                hls = null;
+            }
+            document.getElementById('tv-status').innerText = 'Paused (Tab Backgrounded)';
+        }
+
+        function playChannel(ch, element) {
+            const video = document.getElementById('video-player');
+            const title = document.getElementById('video-title');
+            const overlay = document.getElementById('video-overlay');
+
+            document.querySelectorAll('.channel-item').forEach(el => el.classList.remove('active'));
+            element.classList.add('active');
+
+            title.innerText = ch.name;
+            overlay.style.opacity = '1';
+
+            if (Hls.isSupported()) {
+                if (hls) hls.destroy();
+                hls = new Hls();
+                hls.loadSource(ch.url);
+                hls.attachMedia(video);
+                hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                video.src = ch.url;
+                video.addEventListener('loadedmetadata', () => video.play());
+            }
+
+            document.getElementById('tv-status').innerText = `Streaming: ${ch.name}`;
+            setTimeout(() => { overlay.style.opacity = '0'; }, 5000);
+        }
+
+        async function loadMcpServers() {
+            try {
+                const res = await fetch('/api/mcp/config');
+                const servers = await res.json();
+                renderMcpServers(servers);
+            } catch (e) {
+                document.getElementById('mcp-list').innerHTML = `Error loading servers: ${e.message}`;
+            }
+        }
+
+        function renderMcpServers(servers) {
+            const list = document.getElementById('mcp-list');
+            if (!servers || servers.length === 0) {
+                list.innerHTML = 'No MCP servers configured in mcp-servers.json';
+                return;
+            }
+
+            list.innerHTML = '';
+            servers.forEach(s => {
+                const statusClass = s.status === 'Online' ? 'mcp-online' : (s.status === 'Error' ? 'mcp-error' : 'mcp-offline');
+                const isChecked = !s.disabled ? 'checked' : '';
+
+                const card = document.createElement('div');
+                card.className = 'mcp-card';
+                card.innerHTML = `
+                    <div>
+                        <div style="font-size: 1.2rem; font-weight: bold; margin-bottom: 5px;">${s.name}</div>
+                        <span class="mcp-status ${statusClass}">${s.status}</span>
+                    </div>
+                    <div>
+                        <label class="switch">
+                            <input type="checkbox" ${isChecked} onchange="toggleMcpServer('${s.name}', !this.checked)">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                `;
+                list.appendChild(card);
+            });
+        }
+
+        async function toggleMcpServer(name, disabled) {
+            log(`[MCP] Requesting toggle for ${name} -> ${disabled ? 'OFF' : 'ON'}`);
+            try {
+                const res = await fetch('/api/mcp/toggle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, disabled })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    renderMcpServers(data.status);
+                    log(`[MCP] ${name} is now ${disabled ? 'disabled' : 'enabled'}.`);
+                } else {
+                    log(`[MCP] Failed to toggle ${name}: ${data.error}`);
+                    loadMcpServers(); // Revert UI
+                }
+            } catch (e) {
+                log(`[MCP] Error toggling ${name}: ${e.message}`);
+                loadMcpServers();
+            }
         }
     </script>
 </body>

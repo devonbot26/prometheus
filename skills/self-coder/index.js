@@ -33,6 +33,100 @@ function autoCommit(filePath, message) {
     }
 }
 
+/**
+ * Creates a Git-based checkpoint (commit + tag) for a file
+ */
+export async function checkpoint(args) {
+    const filePath = args.file_path || "";
+    const label = args.label || "pre-patch";
+    const fullPath = path.resolve(process.cwd(), filePath.replace(/^~/, process.env.HOME));
+
+    if (!fs.existsSync(fullPath)) return { error: "File not found." };
+
+    try {
+        const projRoot = path.resolve(__dirname, '../..');
+        const timestamp = new Date().getTime();
+        const tagName = `self-coder/${timestamp}`;
+
+        execSync(`git add "${fullPath}"`, { cwd: projRoot, stdio: 'pipe' });
+        // Only commit if there are changes to avoid error
+        try {
+            execSync(`git commit -m "checkpoint [${label}]: ${path.basename(filePath)}"`, { cwd: projRoot, stdio: 'pipe' });
+        } catch (commitErr) {
+            // If nothing to commit, we still tag the current state
+        }
+        execSync(`git tag "${tagName}"`, { cwd: projRoot, stdio: 'pipe' });
+
+        return { success: true, tag: tagName, message: `Checkpoint created: ${tagName}` };
+    } catch (e) {
+        return { error: `Checkpoint failed: ${e.message}` };
+    }
+}
+
+/**
+ * Restores a file from a Git checkpoint/tag
+ */
+export async function rollback_patch(args) {
+    const filePath = args.file_path || "";
+    const tag = args.tag || null;
+    const fullPath = path.resolve(process.cwd(), filePath.replace(/^~/, process.env.HOME));
+
+    try {
+        const projRoot = path.resolve(__dirname, '../..');
+        if (tag) {
+            execSync(`git checkout ${tag} -- "${fullPath}"`, { cwd: projRoot, stdio: 'pipe' });
+        } else {
+            // Revert last commit for this file
+            execSync(`git checkout HEAD~1 -- "${fullPath}"`, { cwd: projRoot, stdio: 'pipe' });
+        }
+
+        autoCommit(fullPath, `rollback: reverted changes to ${path.basename(filePath)}`);
+        return { success: true, message: `Rollback successful for ${filePath}` };
+    } catch (e) {
+        return { error: `Rollback failed: ${e.message}` };
+    }
+}
+
+/**
+ * Verifies the syntax of a JavaScript file
+ */
+export async function verify_syntax(args) {
+    const filePath = args.file_path || "";
+    const fullPath = path.resolve(process.cwd(), filePath.replace(/^~/, process.env.HOME));
+
+    if (!fs.existsSync(fullPath)) return { error: "File not found." };
+    if (!fullPath.endsWith('.js') && !fullPath.endsWith('.mjs') && !fullPath.endsWith('.cjs')) {
+        return { success: true, message: "Non-JS file skipped syntax check." };
+    }
+
+    try {
+        execSync(`node --check "${fullPath}"`, { stdio: 'pipe' });
+        return { valid: true };
+    } catch (e) {
+        return { valid: false, error: e.stderr || e.message };
+    }
+}
+
+/**
+ * Runs a quick one-shot test script
+ */
+export async function run_quick_test(args) {
+    const testCode = args.test_code || "";
+    if (!testCode) return { error: "No test code provided." };
+
+    const tempFile = path.join('/tmp', `prom_selftest_${Date.now()}.js`);
+
+    try {
+        fs.writeFileSync(tempFile, testCode);
+        const output = execSync(`node "${tempFile}"`, { encoding: 'utf-8', timeout: 10000, stdio: 'pipe' });
+        return { success: true, output };
+    } catch (e) {
+        return { success: false, error: e.stderr || e.stdout || e.message };
+    } finally {
+        if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+    }
+}
+
 export async function create_draft_skill(args) {
     const name = args.name || "";
     const description = args.description || "No description";
@@ -358,47 +452,57 @@ export async function apply_patch(args) {
             };
         }
 
-        logDebug("[DEBUG] Node 4: Applying replacement");
+        // STEP 4: Creating Checkpoint (New Security Layer)
+        logDebug("[DEBUG] Node 4: Creating checkpoint before patch");
+        const cp = await checkpoint({ file_path: filePath, label: "pre-patch" });
+
+        logDebug("[DEBUG] Node 5: Applying replacement");
         const newContent = content.replace(targetContent, replacementContent);
         fs.writeFileSync(fullPath, newContent);
 
-        logDebug("[DEBUG] Node 5: Verification audit (MANDATORY)");
+        // STEP 6: Verification Audit (Syntax check)
+        logDebug("[DEBUG] Node 6: Verification audit (Syntax check)");
+        const syntaxResult = await verify_syntax({ file_path: filePath });
+
+        if (!syntaxResult.valid) {
+            logDebugError("[DEBUG] Terminal: Syntax Verification Failed. Rolling back...");
+            await rollback_patch({ file_path: filePath, tag: cp.tag });
+            return {
+                success: false,
+                error: `SYNTAX ERROR: Your patch broke the file code. Rollback triggered.\nError: ${syntaxResult.error}`,
+                hint: 'Fix the syntax in your replacement_content and try again.'
+            };
+        }
+
+        // Final sanity check (content match)
         const verifyContent = fs.readFileSync(fullPath, 'utf-8');
         const verified = verifyContent.includes(replacementContent);
 
         if (!verified) {
-            logDebugError("[DEBUG] Terminal: Verification Failed");
+            logDebugError("[DEBUG] Terminal: Content match check failed. Rolling back...");
+            await rollback_patch({ file_path: filePath, tag: cp.tag });
             return {
                 success: false,
-                error: 'VERIFICATION FAILED: Patch was written but replacement content not found on re-read.',
-                hint: 'The file might be corrupted or another process modified it. Check manually.'
+                error: 'VERIFICATION FAILED: Replacement content not found after write. Rollback triggered.',
+                hint: 'The patch might have failed to replace correctly. Check your target_content.'
             };
         }
 
-        if (verifyContent.length === 0 && content.length > 0) {
-            logDebugError("[DEBUG] Terminal: Empty File Guard Triggered");
-            return {
-                success: false,
-                error: 'CRITICAL: File is now empty after patch.',
-                hint: 'This looks like data loss. Please undo or restore from backup immediately.'
-            };
-        }
-
-        logDebug("[DEBUG] Node 6: Auto-committing patch");
+        logDebug("[DEBUG] Node 7: Auto-committing patch");
         autoCommit(fullPath, `fix(self-coder): patch ${path.basename(filePath)}`);
 
-        logAction("FILE_EDIT", `Applied precise patch to ${filePath}`, "self-coder");
+        logAction("FILE_EDIT", `Applied precise patch to ${filePath} (Verified)`, "self-coder");
 
         return {
             success: true,
             verified: true,
-            message: `Successfully patched and verified ${filePath}`
+            message: `Successfully patched, verified, and committed ${filePath}`
         };
     } catch (e) {
         logDebugError(`[DEBUG] Terminal: Patch Error: ${e.message}`);
         return {
             error: `Patch error: ${e.message}`,
-            hint: "Check file permissions. Do NOT retry automatically."
+            hint: "Detailed error occurred. Rolling back to be safe."
         };
     }
 }
@@ -538,5 +642,33 @@ export async function write_file(args) {
     } catch (e) {
         logDebugError(`[DEBUG] Terminal: Write Error: ${e.message}`);
         return { error: `Write error: ${e.message}` };
+    }
+}
+
+/**
+ * Adjusts the prioritization boost for a specific skill based on user feedback.
+ * Prometheus will remember this decision for future intent resolution.
+ */
+export async function adjust_intent_priority(args) {
+    const { skill_id, boost = 5 } = args;
+
+    if (!skill_id) return { error: "Missing skill_id" };
+
+    try {
+        const { updatePriority } = await import('../../core/decision-tree.js');
+        const result = updatePriority(skill_id, boost);
+
+        if (result.success) {
+            logAction("INTENT_ADJUSTED", `Boosted ${skill_id} by ${boost}. New total: ${result.new_boost}`, "self-coder");
+            return {
+                success: true,
+                message: `Understood. I have prioritized "${skill_id}" and will remember this for future requests.`,
+                new_priority: result.new_boost
+            };
+        } else {
+            return { error: result.error };
+        }
+    } catch (e) {
+        return { error: `Failed to load decision engine: ${e.message}` };
     }
 }

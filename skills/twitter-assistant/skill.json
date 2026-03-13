@@ -1,0 +1,66 @@
+{
+    "name": "twitter-assistant",
+    "description": "An assistant that can post tweets, search for discussions, and get info from X (Twitter).",
+    "tools": {
+        "post_tweet": {
+            "path": "index.js",
+            "function": "post_tweet",
+            "description": "Posts a new tweet to X (Twitter). Strictly limited to 280 characters.",
+            "parameters": {
+                "text": {
+                    "type": "string",
+                    "description": "The content of the tweet.",
+                    "required": true
+                }
+            }
+        },
+        "search_tweets": {
+            "path": "index.js",
+            "function": "search_tweets",
+            "description": "Searches for recent tweets based on a query.",
+            "parameters": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query (keyword or hashtag).",
+                    "required": true
+                }
+            }
+        },
+        "get_user_tweets": {
+            "path": "index.js",
+            "function": "get_user_tweets",
+            "description": "Retrieves recent tweets from a specific Twitter handle.",
+            "parameters": {
+                "username": {
+                    "type": "string",
+                    "description": "The Twitter handle (e.g., 'elonmusk').",
+                    "required": true
+                }
+            }
+        },
+        "trend_intelligence": {
+            "path": "index.js",
+            "function": "trend_intelligence",
+            "description": "Analyzes trends across social platforms (scaffold).",
+            "parameters": {
+                "topic": {
+                    "type": "string",
+                    "description": "The topic to analyze.",
+                    "required": true
+                }
+            }
+        },
+        "sentiment_gatekeeper": {
+            "path": "index.js",
+            "function": "sentiment_gatekeeper",
+            "description": "Checks a draft tweet for brand safety and spam keywords.",
+            "parameters": {
+                "draft": {
+                    "type": "string",
+                    "description": "The tweet draft to check.",
+                    "required": true
+                }
+            }
+        }
+    }
+}

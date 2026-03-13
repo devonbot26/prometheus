@@ -1,0 +1,42 @@
+{
+    "name": "health-check",
+    "id": "health-check",
+    "version": "1.0.0",
+    "description": "System diagnostics and self-healing planning tools to recover from errors without dead-end looping.",
+    "meta": {
+        "intent": {
+            "triggers": [
+                "diagnose",
+                "system health",
+                "error logs",
+                "troubleshoot",
+                "why did it fail"
+            ],
+            "context_hints": [
+                "crash",
+                "fix",
+                "symptoms",
+                "dead-end"
+            ]
+        }
+    },
+    "tools": {
+        "diagnose_system_health": {
+            "path": "index.js",
+            "function": "diagnose_system_health",
+            "description": "Perform a 4-point system audit (Logs, Syntax, Processes, Memory) to plan a self-healing patch. NEVER use this in a loop; use it ONCE to build a plan.",
+            "parameters": {
+                "error_id": {
+                    "type": "string",
+                    "description": "The specific error code or message to investigate (e.g., 'ERR-144' or 'SyntaxError')",
+                    "required": true
+                },
+                "suspect_file": {
+                    "type": "string",
+                    "description": "Optional: A specific file path to run syntax checks against",
+                    "required": false
+                }
+            }
+        }
+    }
+}

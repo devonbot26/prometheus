@@ -1,0 +1,100 @@
+{
+    "name": "browser-control",
+    "version": "1.0.0",
+    "description": "Interactive browser automation. Allows Prometheus to click, type, and navigate real websites using Puppeteer.",
+    "tools": {
+        "browser_open": {
+            "path": "index.js",
+            "function": "browser_open",
+            "description": "Opens a Chrome instance and navigates to the URL. If a browser is already open, it reuses the session.",
+            "parameters": {
+                "url": {
+                    "type": "string",
+                    "description": "The URL to visit.",
+                    "required": true
+                }
+            }
+        },
+        "browser_click": {
+            "path": "index.js",
+            "function": "browser_click",
+            "description": "Clicks an element on the current page. Supports CSS selectors or exact text matches.",
+            "parameters": {
+                "selector": {
+                    "type": "string",
+                    "description": "The CSS selector (e.g. 'button.submit') or text (e.g. 'Login') to click.",
+                    "required": true
+                }
+            }
+        },
+        "browser_type": {
+            "path": "index.js",
+            "function": "browser_type",
+            "description": "Types text into a specified input field.",
+            "parameters": {
+                "selector": {
+                    "type": "string",
+                    "description": "The CSS selector of the input field.",
+                    "required": true
+                },
+                "text": {
+                    "type": "string",
+                    "description": "The text to type.",
+                    "required": true
+                },
+                "pressEnter": {
+                    "type": "boolean",
+                    "description": "Whether to press Enter after typing.",
+                    "required": false
+                }
+            }
+        },
+        "browser_wait": {
+            "path": "index.js",
+            "function": "browser_wait",
+            "description": "Pauses execution until a selector appears or a timeout is reached.",
+            "parameters": {
+                "selector": {
+                    "type": "string",
+                    "description": "The CSS selector to wait for.",
+                    "required": true
+                },
+                "timeout": {
+                    "type": "number",
+                    "description": "Timeout in milliseconds (default 5000).",
+                    "required": false
+                }
+            }
+        },
+        "browser_screenshot": {
+            "path": "index.js",
+            "function": "browser_screenshot",
+            "description": "Takes a screenshot of the current browser page and saves it to data/screenshots/.",
+            "parameters": {
+                "fileName": {
+                    "type": "string",
+                    "description": "Optional name for the screenshot file (e.g. 'homepage.png').",
+                    "required": false
+                }
+            }
+        },
+        "browser_extract_text": {
+            "path": "index.js",
+            "function": "browser_extract_text",
+            "description": "Extracts the visible text from the page or a specific element.",
+            "parameters": {
+                "selector": {
+                    "type": "string",
+                    "description": "Optional CSS selector to target (defaults to 'body').",
+                    "required": false
+                }
+            }
+        },
+        "browser_close": {
+            "path": "index.js",
+            "function": "browser_close",
+            "description": "Closes the current browser session and releases memory.",
+            "parameters": {}
+        }
+    }
+}

@@ -1,5 +1,4 @@
 import 'dotenv/config';
-import fetch from 'node-fetch';
 import { logDebug, logDebugError } from './logger.js';
 /**
  * Prometheus LLM Interface
@@ -12,8 +11,8 @@ function getLocalUrl() {
 }
 const GEMINI_MODEL = 'gemini-2.0-flash';
 
-const LOCAL_MODEL_4B = process.env.LLM_MODEL || 'mlx-community/Qwen3.5-4B-4bit';
-const LOCAL_MODEL_9B = 'mlx-community/Qwen3.5-9B-4bit';
+const LOCAL_MODEL_4B = process.env.LLM_MODEL || 'Jackrong/MLX-Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-4bit';
+const LOCAL_MODEL_9B = process.env.LLM_MODEL_9B || 'Jackrong/MLX-Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-4bit'; // Universal default
 
 /**
  * Check if local LLM server is available
@@ -47,7 +46,8 @@ async function callLocal(messages, options = {}) {
 
             // VL models launched via start_llama.sh currently use mlx_vlm, which omits the /v1 prefix.
             const modelNameLower = targetModel.toLowerCase();
-            const isVL = modelNameLower.includes('vl') || modelNameLower.includes('qwen3.5');
+            const isVL = modelNameLower.includes('vl');
+            // mlx_vlm (used for Qwen3.5/VL) often exposes /chat/completions instead of /v1/chat/completions
             const endpoint = isVL ? '/chat/completions' : '/v1/chat/completions';
 
             // mlx_vlm.server strict compatibility dictates omit adapters from generation payload
@@ -63,7 +63,8 @@ async function callLocal(messages, options = {}) {
             const res = await fetch(`${getLocalUrl()}${endpoint}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(reqBody)
+                body: JSON.stringify(reqBody),
+                signal: options.signal
             });
 
             if (!res.ok) {
@@ -119,6 +120,125 @@ async function callLocal(messages, options = {}) {
 }
 
 /**
+ * Call Local Model (Streaming)
+ */
+async function callLocalStreaming(messages, options = {}) {
+    const targetModel = options.deepThinking ? LOCAL_MODEL_9B : LOCAL_MODEL_4B;
+    const modelNameLower = targetModel.toLowerCase();
+    const isVL = modelNameLower.includes('vl');
+    const endpoint = isVL ? '/chat/completions' : '/v1/chat/completions';
+    console.log(`[DEBUG] Selected endpoint: ${endpoint} for model: ${targetModel}`);
+
+    console.log(`[DEBUG] Calling ${getLocalUrl()}${endpoint} with stream: true`);
+
+    const reqStart = Date.now();
+    let firstTokenTime = 0;
+
+    const reqBody = {
+        model: targetModel,
+        messages,
+        temperature: options.temperature ?? 0.0,
+        max_tokens: options.maxTokens ?? 2048,
+        stream: true
+    };
+
+    if (options.adapterPath && !isVL) {
+        reqBody.adapters = options.adapterPath;
+    }
+
+    const res = await fetch(`${getLocalUrl()}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(reqBody),
+        signal: options.signal
+    });
+
+    if (!res.ok) {
+        throw new Error(`Local LLM Streaming Error (${res.status}): ${res.statusText}`);
+    }
+
+    if (!res.body) {
+        throw new Error("Local LLM Streaming Error: No response body received.");
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    let textOut = '';
+    let reasoningOut = '';
+    let streamDone = false;
+    let completionTokens = 0;
+
+    while (!streamDone) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        if (!firstTokenTime) {
+            firstTokenTime = Date.now();
+            logDebug(`[DEBUG] [TTFT] ${firstTokenTime - reqStart}ms`);
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+            if (line.trim() === '') continue;
+            if (line.startsWith('data: ')) {
+                const dataStr = line.substring(6).trim();
+
+                if (dataStr === '[DONE]') {
+                    streamDone = true;
+                    continue;
+                }
+
+                try {
+                    const data = JSON.parse(dataStr);
+                    if (data.choices && data.choices.length > 0) {
+                        const delta = data.choices[0].delta || {};
+                        const chunkContent = delta.content || '';
+                        const chunkReasoning = delta.reasoning || '';
+
+                        if (chunkContent) {
+                            completionTokens++;
+                            textOut += chunkContent;
+                            if (options.onToken) {
+                                options.onToken(chunkContent, false);
+                            }
+                        }
+
+                        if (chunkReasoning) {
+                            completionTokens++;
+                            reasoningOut += chunkReasoning;
+                            if (options.onToken) {
+                                options.onToken(chunkReasoning, true);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error('[DEBUG] Stream parse error:', e.message, 'Line:', dataStr);
+                }
+            }
+        }
+    }
+
+    const endTime = Date.now();
+    const genDurationS = firstTokenTime && endTime > firstTokenTime ? (endTime - firstTokenTime) / 1000 : 0.1;
+    const tps = completionTokens > 0 && genDurationS > 0 ? (completionTokens / genDurationS).toFixed(1) : 0;
+
+    return {
+        text: textOut,
+        reasoning: reasoningOut,
+        usage: {
+            completion_tokens: completionTokens,
+            total_tokens: completionTokens
+        },
+        tps: parseFloat(tps)
+    };
+}
+
+/**
  * Call Gemini (Cloud) LLM
  */
 async function callGemini(messages, options = {}) {
@@ -147,7 +267,8 @@ async function callGemini(messages, options = {}) {
         const res = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(requestBody)
+            body: JSON.stringify(requestBody),
+            ...(options.signal && { signal: options.signal })
         });
 
         if (!res.ok) {
@@ -211,7 +332,7 @@ export async function chat(messages, options = {}) {
     }
 
     if (modelToUse === 'local' && await isLocalAvailable()) {
-        const result = await callLocal(messages, options);
+        const result = options.onToken ? await callLocalStreaming(messages, options) : await callLocal(messages, options);
         return { ...result, model: 'local' };
     }
 
@@ -272,8 +393,7 @@ export async function chat(messages, options = {}) {
 
     // 2. Local Usage
     if (options.deepThinking || options.forceLocal) {
-        if (!await isLocalAvailable()) throw new Error('Local LLM server is not ready');
-        const result = await callLocal(messages, options);
+        const result = options.onToken ? await callLocalStreaming(messages, options) : await callLocal(messages, options);
         // Derive a readable model identifier from LLM_MODEL
         const modelStr = process.env.LLM_MODEL || 'local';
         const modelBase = modelStr.split('/').pop();
@@ -292,7 +412,7 @@ export async function chat(messages, options = {}) {
 
     // 4. Fallback logic: Try Local first, then Cloud
     if (await isLocalAvailable()) {
-        const result = await callLocal(messages, options);
+        const result = options.onToken ? await callLocalStreaming(messages, options) : await callLocal(messages, options);
         const modelStr2 = process.env.LLM_MODEL || 'local';
         const modelBase2 = modelStr2.split('/').pop();
         const sizeMatch2 = modelBase2.match(/(\d+[Bb])/);

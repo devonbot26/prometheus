@@ -31,7 +31,7 @@
         "system_repair_gmail": {
             "path": "index.js",
             "function": "system_repair_gmail",
-            "description": "DEPRECATED: Use the standard re-auth flow. This tool is provided for compatibility with legacy agent calls. Repair Gmail API authentication.",
+            "description": "Start an autonomous Gmail re-authorization listener. Returns a URL for the user to visit; Prometheus will automatically capture the code upon sign-in.",
             "parameters": {}
         }
     }

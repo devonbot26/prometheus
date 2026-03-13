@@ -56,7 +56,10 @@ Direct testing confirms that **Qwen3.5 4B** effectively resolves the failures se
 - **Qwen2.5 7B**: **Winner on Pythonic Logic**. Used the built-in `OrderedDict` for the most concise and idiomatic Python solution.
 - **Qwen3.5 9B**: **Deepest Documentation**. Provided the most exhaustive step-by-step thinking process for the implementation, though slowest to generate.
 
-## Final Recommendations for M1 (16GB)
-- **Primary Choice: Qwen3.5 4B**. Its combination of low RAM (~3GB), 256k context, and high reliability makes it the best overall pick for most tasks.
-- **Stability Choice: Qwen2.5 7B (LEGACY)**. While reliable, it has been officially retired in favor of the more efficient Qwen3.5 4B for standard tasks and 9B for deep reasoning.
-- **Avoid: Qwen3.5 9B** for primary use unless strictly necessary, as its 6GB footprint plus context overhead will likely push a 16GB system into heavy swap.
+## Final Recommendations for M1 (16GB) - UPDATED MARCH 2026
+- **Primary Choice: Qwen3.5 9B Distilled (Claude-4.6-Opus)**. Replaces 4B as the recommended daily driver. It provides Frontier-level logic within a stable 5.1GB footprint, perfectly optimized for 16GB M1 systems.
+- **Efficiency Choice: Qwen3.5 4B**. Still excellent for simple automation, but no longer the default due to occasional logic caps.
+- **Retired: Qwen2.5 7B**. No longer needed as Distilled 9B is both smarter and more efficient.
+
+> [!TIP]
+> **Why 9B Distilled?** It offers the "best of both worlds"—the speed of a medium model with the reasoning chains of a massive one (Claude Opus), without the RAM overhead that previously made 9B models risky on 16GB systems.

@@ -1,8 +1,0 @@
-{
-  "id": "ERR-039",
-  "timestamp": "2026-02-27T14:12:49.896Z",
-  "status": "active",
-  "error": "Failed to fetch weather for Charlottetown, PE (Both providers failed).",
-  "context": "Tool call: get_weather",
-  "steps_taken": []
-}

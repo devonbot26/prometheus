@@ -79,7 +79,7 @@ if (freeMB < 1000) {
     if (isHeavy) {
         console.log(`${C.yellow}💡 Recommendation: Close unnecessary apps (Chrome/Docker) to free up RAM.${C.reset}\n`);
     } else {
-        console.log(`${C.yellow}💡 Recommendation: Consider staying on Qwen3.5 4B for optimal M1 performance.${C.reset}\n`);
+        console.log(`${C.yellow}💡 Recommendation: Consider staying on Qwen3.5 9B for optimal M1 performance.${C.reset}\n`);
     }
 }
 
@@ -96,7 +96,10 @@ function checkServerHealth() {
                 clearTimeout(timeoutId);
                 if (res.ok) resolve(true);
                 else {
-                    fetch(`http://127.0.0.1:${LLAMA_PORT}/health`).then(r => resolve(r.ok)).catch(() => resolve(false));
+                    fetch(`http://127.0.0.1:${LLAMA_PORT}/models`).then(r => {
+                        if (r.ok) resolve(true);
+                        else fetch(`http://127.0.0.1:${LLAMA_PORT}/health`).then(r2 => resolve(r2.ok)).catch(() => resolve(false));
+                    }).then(res2 => resolve(res2)).catch(() => resolve(false));
                 }
             })
             .catch(() => {
@@ -126,6 +129,8 @@ async function getLoadedModels() {
 
 // Track the server process globally so we can kill it
 let serverProcess = null;
+let isRestarting = false;
+
 
 /**
  * Starts the Llama Server with an optional model
@@ -150,7 +155,7 @@ function startLlamaServer(modelName) {
         }
     }
 
-    const model = modelName || process.env.LLM_MODEL || 'mlx-community/Qwen3.5-4B-4bit';
+    const model = modelName || process.env.LLM_MODEL || 'mlx-community/Qwen3.5-9B-Instruct-4bit';
     const logFile = createWriteStream('./logs/mlx_server.log', { flags: 'a' });
 
     console.log(`${C.dim}Environment: ${pythonPath}${C.reset}`);
@@ -161,7 +166,7 @@ function startLlamaServer(modelName) {
     let adapterDir = null;
 
     if (modelLow.includes('qwen3.5')) {
-        adapterDir = path.join(process.cwd(), 'adapters', 'qwen3.5-4b');
+        adapterDir = path.join(process.cwd(), 'adapters', 'qwen3.5-9b');
     }
 
     if (adapterDir && existsSync(adapterDir)) {
@@ -176,13 +181,15 @@ function startLlamaServer(modelName) {
         console.log(`${C.green}✨ Using startup script: ${STARTUP_SCRIPT}${C.reset}`);
         serverProcess = spawn('bash', [STARTUP_SCRIPT, model], {
             stdio: 'pipe',
+            detached: true, // Group processes for clean shutdown
             env: { ...process.env, PORT: LLAMA_PORT }
         });
     } else {
         // Fallback to manual spawn if script missing
         console.log(`${C.dim}Executing manual spawn: ${pythonPath}${C.reset}`);
         serverProcess = spawn(pythonPath, ['-m', 'mlx_lm', 'server', '--model', model, '--port', LLAMA_PORT, '--trust-remote-code', ...adapterArgs], {
-            stdio: 'pipe'
+            stdio: 'pipe',
+            detached: true // Group processes for clean shutdown
         });
     }
 
@@ -201,7 +208,8 @@ function startLlamaServer(modelName) {
 async function killPort(port) {
     return new Promise((resolve) => {
         try {
-            const pids = execSync(`lsof -ti:${port}`).toString().trim();
+            const pids = execSync(`lsof -ti:${port} -sTCP:LISTEN`).toString().trim();
+
             if (pids) {
                 console.log(`${C.red}💀 Killing processes on port ${port}: ${pids.split('\n').join(', ')}${C.reset}`);
                 execSync(`kill -9 ${pids.split('\n').join(' ')}`);
@@ -249,10 +257,18 @@ const cleanup = async () => {
         }
     } catch (e) { }
 
-    // Backup sweeping catch for any stray mlx servers
     try {
-        execSync('pkill -9 -f "mlx_lm.server"');
+        console.log(`${C.dim}🧹 Sweeping orphaned MCP server processes...${C.reset}`);
+        execSync(`pkill -f mcp-server`);
     } catch (e) { }
+
+    // Targeted sweep for our specific Llama Server process group
+    if (serverProcess && serverProcess.pid) {
+        console.log(`${C.red}💀 Terminating Llama Process Group (PID: -${serverProcess.pid})${C.reset}`);
+        try {
+            process.kill(-serverProcess.pid, 'SIGKILL');
+        } catch (e) { }
+    }
 
     console.log(`${C.green}✅ Shutdown complete.${C.reset}`);
     process.exit(0);
@@ -268,10 +284,18 @@ async function main() {
     // 0. Clean up Web Port causing EADDRINUSE
     await killPort(WEB_PORT);
 
+    // 0.1 Archive old error logs to keep workspace clean
+    try {
+        console.log(`${C.dim}🧹 Archiving old error logs...${C.reset}`);
+        execSync(`node scripts/log_archive.js`, { stdio: 'inherit' });
+    } catch (e) {
+        console.error(`${C.red}⚠️ Log archiving failed: ${e.message}${C.reset}`);
+    }
+
     // 1. Initial Health Check
     let availableModels = await getLoadedModels();
     const isCli = process.argv.includes('--cli');
-    const DEFAULT_MODEL = process.env.LLM_MODEL || 'mlx-community/Qwen3.5-4B-4bit';
+    const DEFAULT_MODEL = process.env.LLM_MODEL || 'mlx-community/Qwen3.5-9B-Instruct-4bit';
 
     // Retry once if availableModels is empty (server might be warming up)
     if (availableModels.length === 0) {
@@ -315,47 +339,122 @@ async function main() {
 
     console.log(`${C.green}✅ Llama Server is online on port ${LLAMA_PORT}${C.reset}`);
 
+    // Activity tracking for idle unload
+    const IDLE_TIMEOUT = process.env.IDLE_UNLOAD_MINUTES ? (parseInt(process.env.IDLE_UNLOAD_MINUTES) * 60000) : 900000; // Default 15 mins
+    let lastActivityTime = Date.now();
+
     // 2. Start the Interface (Web or CLI)
-    const script = isCli ? 'channels/cli.js' : 'channels/web_server.js';
-    const name = isCli ? 'Prometheus CLI' : 'Prometheus Web Server';
+    const startUI = () => {
+        const script = isCli ? 'channels/cli.js' : 'channels/web_server.js';
+        const name = isCli ? 'Prometheus CLI' : 'Prometheus Web Server';
 
-    console.log(`${C.blue}🚀 Launching ${name}...${C.reset}\n`);
-    const proc = spawn('node', [script], { stdio: ['inherit', 'inherit', 'inherit', 'ipc'] });
-    global.uiProcess = proc; // Store globally for cleanup
+        console.log(`${C.blue}🚀 Launching ${name}...${C.reset}\n`);
+        const args = ['--max-old-space-size=1024', script];
+        if (isCli) args.push(...process.argv.slice(3));
+        const proc = spawn('node', args, { stdio: ['inherit', 'inherit', 'inherit', 'ipc'] });
+        global.uiProcess = proc;
 
-    proc.on('message', async (msg) => {
-        if (msg.type === 'SHUTDOWN') {
-            console.log(`\n${C.yellow}🔄 Manager: Received manual shutdown request from CLI.${C.reset}`);
-            // Force the cleanup immediately
-            await cleanup();
-            return;
-        }
-        if (msg.type === 'RESTART_LLAMA') {
-            const available = await getLoadedModels();
-            if (available.includes(msg.model)) {
-                console.log(`${C.green}✅ Correct model ${msg.model} active. No action.${C.reset}`);
+        proc.on('message', async (msg) => {
+            lastActivityTime = Date.now();
+            if (msg.type === 'SHUTDOWN') {
+                console.log(`\n${C.yellow}🔄 Manager: Received manual shutdown request from CLI.${C.reset}`);
+                await cleanup();
                 return;
             }
-            console.log(`\n${C.yellow}🔄 Manager: Received restart request for model: ${msg.model || 'default'}${C.reset}`);
-            logGepEvent('repair', 'model_restart_requested', { model: msg.model });
-            await killServer();
-            startLlamaServer(msg.model);
-        }
-    });
+            if (msg.type === 'RESTART_LLAMA') {
+                if (isRestarting) return;
+                isRestarting = true;
+                try {
+                    const available = await getLoadedModels();
+                    if (available.includes(msg.model)) {
+                        console.log(`${C.green}✅ Correct model ${msg.model} active. No action.${C.reset}`);
+                        isRestarting = false;
+                        return;
+                    }
+                    console.log(`\n${C.yellow}🔄 Manager: Received restart request for model: ${msg.model || 'default'}${C.reset}`);
+                    logGepEvent('repair', 'model_restart_requested', { model: msg.model });
+                    await killServer();
+                    startLlamaServer(msg.model);
+                    // isRestarting will be reset by the health loop or a successful start
+                    const checkHealthy = async () => {
+                        const h = await checkServerHealth();
+                        if (h) {
+                            isRestarting = false;
+                        } else {
+                            setTimeout(checkHealthy, 2000);
+                        }
+                    };
+                    checkHealthy();
+                } catch (e) {
+                    isRestarting = false;
+                }
+            }
 
-    proc.on('close', async (code) => {
-        console.log(`${C.dim}Prometheus child process exited with code ${code}${C.reset}`);
-        await cleanup();
-    });
+        });
+
+        let crashCount = 0;
+        let lastCrashTime = 0;
+
+        proc.on('close', async (code, signal) => {
+            console.log(`${C.dim}Prometheus child process exited with code ${code} and signal ${signal}${C.reset}`);
+            
+            // If the launcher is already cleaning up, don't try to restart
+            if (isCleaningUp) return;
+
+            // Auto-Restart Logic (Supervisor Pattern)
+            const now = Date.now();
+            if (now - lastCrashTime < 60000) crashCount++;
+            else crashCount = 1;
+            lastCrashTime = now;
+
+            if (crashCount >= 5) { // Increased tolerance
+                console.log(`${C.red}💀 Rapid crash loop detected (${crashCount} crashes in <60s). Shutting down ecosystem.${C.reset}`);
+                await cleanup();
+                return;
+            }
+
+            // A crash is defined as:
+            // 1. A non-zero exit code
+            // 2. A null code + a present signal (e.g. SIGKILL, SIGSEGV)
+            const isCrash = (code !== 0 && code !== null) || (code === null && signal !== null);
+
+            if (isCrash) {
+                console.log(`${C.yellow}🔄 Supervisor: Node process crashed or was killed by signal ${signal}. Respawning ${name} in 3s... (Crash ${crashCount}/5)${C.reset}`);
+                setTimeout(startUI, 3000);
+            } else {
+                // Normal exit (e.g. CTRL+C in CLI handled by child or process.exit(0))
+                console.log(`${C.dim}Supervisor: Normal exit detected. Cleaning up...${C.reset}`);
+                await cleanup();
+            }
+        });
+    };
+
+    startUI();
 
     // 3. Periodic Health Watchdog
     setInterval(async () => {
-        const isAlive = await checkServerHealth();
-        if (!isAlive) {
-            console.log(`\n${C.red}⚠️  Watchdog: Llama Server unresponsive! Restarting...${C.reset}`);
-            logGepEvent('repair', 'server_unresponsive', { model: process.env.LLM_MODEL });
+        const healthy = await checkServerHealth();
+        if (!healthy) {
+            // Only restart if we've had activity recently, otherwise just let it stay dead to save RAM
+            if (Date.now() - lastActivityTime < IDLE_TIMEOUT) {
+                console.log(`\n${C.red}⚠️  Watchdog: Llama Server unresponsive! Restarting...${C.reset}`);
+                logGepEvent('repair', 'server_unresponsive', { model: process.env.LLM_MODEL });
+                await killServer();
+                startLlamaServer();
+            }
+            return;
+        }
+
+        // Idle Unload Logic
+        const idleTime = Date.now() - lastActivityTime;
+        if (idleTime > IDLE_TIMEOUT) {
+            console.log(`\n${C.magenta}💤 Idle Timeout (${Math.floor(idleTime / 60000)}m). Unloading model to release RAM...${C.reset}`);
+            logGepEvent('resource', 'idle_unload', { idle_minutes: Math.floor(idleTime / 60000) });
             await killServer();
-            startLlamaServer();
+            if (global.uiProcess && global.uiProcess.connected) {
+                global.uiProcess.send({ type: 'MODEL_SLEEPING' });
+            }
+
         }
     }, CHECK_INTERVAL);
 

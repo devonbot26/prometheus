@@ -1,8 +1,0 @@
-{
-  "id": "ERR-040",
-  "timestamp": "2026-02-27T14:22:15.608Z",
-  "status": "active",
-  "error": "Insufficient Permission",
-  "context": "Tool call: drive_backup",
-  "steps_taken": []
-}

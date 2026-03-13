@@ -1,8 +1,0 @@
-{
-  "id": "ERR-029",
-  "timestamp": "2026-02-24T17:13:50.443Z",
-  "status": "active",
-  "error": "Unknown tool: sys_admin",
-  "context": "Tool call: sys_admin",
-  "steps_taken": []
-}

@@ -1,8 +1,0 @@
-{
-  "id": "ERR-021",
-  "timestamp": "2026-02-24T03:45:42.450Z",
-  "status": "active",
-  "error": "Failed to fetch weather for current location (Both providers failed).",
-  "context": "Tool call: get_weather",
-  "steps_taken": []
-}

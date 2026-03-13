@@ -47,16 +47,36 @@ export async function handoff_to(args) {
         };
     }
 
+    // Step 3: Prevent Infinite Critique Loops by tracking retry_count
+    let currentRetryCount = 0;
+    if (fs.existsSync(HANDOFF_PATH)) {
+        try {
+            const oldHandoff = JSON.parse(fs.readFileSync(HANDOFF_PATH, 'utf-8'));
+            // If the PM is sending it back to the SAME role that just returned it, increment retry
+            // Remember: oldHandoff.from_role might be "team-coder", but normalizedRole is "coder"
+            const oldFromBase = oldHandoff.from_role ? oldHandoff.from_role.replace('team-', '') : '';
+            if (args?._caller_role === 'team-manager' && oldFromBase === normalizedRole.replace('team-', '')) {
+                currentRetryCount = (oldHandoff.retry_count || 0) + 1;
+            }
+        } catch (e) { /* ignore parse error */ }
+    }
+
     const handoff = {
         to: normalizedRole,
+        from_role: args?._caller_role || 'unknown',
         timestamp: new Date().toISOString(),
         context: context,
-        return_to: 'team-manager' // Enforce auto-return to PM
+        return_to: 'team-manager', // Enforce auto-return to PM
+        retry_count: currentRetryCount
     };
 
     fs.writeFileSync(HANDOFF_PATH, JSON.stringify(handoff, null, 2));
 
-    logAction("PM_HANDOFF", `Delegated control to ${normalizedRole}: "${context.substring(0, 100)}..."`, "team-manager");
+    let logMessage = `Delegated control to ${normalizedRole}: "${context.substring(0, 100)}..."`;
+    if (args?._caller_role && args?._caller_role !== 'team-manager') {
+        logMessage = `Returned control from ${args._caller_role} to ${normalizedRole}: "${context.substring(0, 100)}..."`;
+    }
+    logAction("PM_HANDOFF", logMessage, args?._caller_role || "team-manager");
 
     const modeKey = normalizedRole.startsWith('team-') ? normalizedRole : `team-${normalizedRole}`;
 
@@ -322,5 +342,104 @@ export async function escalate_to_9b(args) {
         message: `Task escalated to 9B model. Reason: ${reason}`,
         next_mode: 'team-manager',
         deep_thinking: true
+    };
+}
+/**
+ * Helper to check and reset state if it's older than 24 hours
+ */
+function checkStaleState() {
+    try {
+        if (fs.existsSync(PM_STATE_PATH)) {
+            const stats = fs.statSync(PM_STATE_PATH);
+            const now = new Date().getTime();
+            const modified = stats.mtimeMs;
+            const hoursOld = (now - modified) / (1000 * 60 * 60);
+
+            if (hoursOld > 24) {
+                console.log(`🧹 [SYSTEM] Team state is ${Math.round(hoursOld)}h old. Auto-resetting for housekeeping.`);
+                reset_team_state();
+            }
+        }
+    } catch (e) { /* ignore */ }
+}
+
+// Run check on load
+checkStaleState();
+
+/**
+ * Recover stalled tasks by scanning for expired timers and resetting those steps.
+ */
+export async function recover_stalled_task() {
+    const TIMER_PATH = path.join(__dirname, '../../TASK_TIMERS.json');
+    const results = { recovered: [], active: [], message: '' };
+
+    if (!fs.existsSync(TIMER_PATH)) {
+        results.message = 'No active timers found. Plan state appears healthy.';
+        return results;
+    }
+
+    let timers = {};
+    try {
+        timers = JSON.parse(fs.readFileSync(TIMER_PATH, 'utf-8'));
+    } catch (e) {
+        return { error: 'Failed to parse TASK_TIMERS.json', message: e.message };
+    }
+
+    const now = Date.now();
+    let stateChanged = false;
+
+    for (const [role, timer] of Object.entries(timers)) {
+        if (now > timer.expires_at) {
+            // Timer expired — mark step for retry
+            if (fs.existsSync(PM_STATE_PATH)) {
+                const state = JSON.parse(fs.readFileSync(PM_STATE_PATH, 'utf-8'));
+                const step = state.steps.find(s =>
+                    s.assignee && s.assignee.replace('team-', '') === role.replace('team-', '')
+                    && s.status === 'pending'
+                );
+                if (step) {
+                    step.result = `TIMEOUT: No response after ${Math.round(timer.timeout_ms / 60000)} min. Reset for retry.`;
+                    // Keep as pending so the PM picks it up again
+                    stateChanged = true;
+                    results.recovered.push({ role, step_id: step.id, task: step.description });
+                    fs.writeFileSync(PM_STATE_PATH, JSON.stringify(state, null, 2));
+                }
+            }
+            // Clear the expired timer entry
+            delete timers[role];
+        } else {
+            const remainingSec = Math.round((timer.expires_at - now) / 1000);
+            results.active.push({ role, remaining_seconds: remainingSec });
+        }
+    }
+
+    fs.writeFileSync(TIMER_PATH, JSON.stringify(timers, null, 2));
+
+    if (results.recovered.length > 0) {
+        results.message = `Recovered ${results.recovered.length} stalled task(s). They are reset to pending and ready for re-delegation.`;
+        logAction('TASK_RECOVERY', `Recovered stalled tasks: ${results.recovered.map(r => r.role).join(', ')}`, 'team-manager');
+    } else {
+        results.message = `No stalled tasks found. ${results.active.length} timer(s) still active.`;
+    }
+
+    return results;
+}
+
+/**
+ * Reset all team management state files
+ */
+export async function reset_team_state() {
+    const files = [HANDOFF_PATH, TASKS_PATH, PM_STATE_PATH, path.join(__dirname, '../../TASK_TIMERS.json')];
+    let count = 0;
+    for (const f of files) {
+        if (fs.existsSync(f)) {
+            fs.unlinkSync(f);
+            count++;
+        }
+    }
+    logAction("TEAM_RESET", `Cleared ${count} state files for clean startup.`, "team-manager");
+    return {
+        status: 'success',
+        message: `Cleared ${count} state files. Team is now in clean state.`
     };
 }

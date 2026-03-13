@@ -3,7 +3,7 @@
  * Manage local system updates and git operations.
  */
 
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import util from 'util';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -71,12 +71,46 @@ export async function full_system_backup(args) {
     };
 }
 export async function system_repair_gmail() {
-    console.log('🛠️ Repairing Gmail Authentication...');
-    try {
+    console.log('🛠️ Initiating Autonomous Gmail Repair...');
+
+    return new Promise((resolve) => {
         const scriptPath = path.join(PROJECT_ROOT, 'scripts', 'system_repair_gmail.js');
-        const { stdout } = await execPromise(`node ${scriptPath}`);
-        return { success: true, output: stdout };
-    } catch (e) {
-        return { error: `System repair failed: ${e.message}` };
-    }
+        const child = spawn('node', [scriptPath], { cwd: PROJECT_ROOT });
+
+        let capturedUrl = null;
+
+        child.stdout.on('data', (data) => {
+            const output = data.toString();
+            console.log(`[sys-repair] ${output.trim()}`);
+
+            // Extract URL from special prefix
+            if (output.includes('AUTH_URL: ')) {
+                capturedUrl = output.split('AUTH_URL: ')[1].split('\n')[0].trim();
+                console.log(`✅ Captured URL: ${capturedUrl}`);
+                resolve({
+                    success: true,
+                    message: "Autonomous listener started. Please provide this URL to the user to authorize. I will automatically finalize once they sign in.",
+                    auth_url: capturedUrl
+                });
+            }
+        });
+
+        child.stderr.on('data', (data) => {
+            console.error(`[sys-repair-err] ${data.toString()}`);
+        });
+
+        child.on('close', (code) => {
+            if (code !== 0 && !capturedUrl) {
+                resolve({ error: `Repair script exited with code ${code}` });
+            }
+        });
+
+        // Timeout fallback
+        setTimeout(() => {
+            if (!capturedUrl) {
+                child.kill();
+                resolve({ error: "Timed out waiting for Auth URL." });
+            }
+        }, 10000);
+    });
 }

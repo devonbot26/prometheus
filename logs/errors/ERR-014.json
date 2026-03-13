@@ -1,8 +1,0 @@
-{
-  "id": "ERR-014",
-  "timestamp": "2026-02-23T13:46:24.072Z",
-  "status": "active",
-  "error": "Web search dependency is not installed on this machine.",
-  "context": "Tool call: web_search",
-  "steps_taken": []
-}

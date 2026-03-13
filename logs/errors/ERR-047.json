@@ -1,8 +1,0 @@
-{
-  "id": "ERR-047",
-  "timestamp": "2026-02-28T02:31:20.638Z",
-  "status": "active",
-  "error": "Local LLM Error (404): {\"error\":\"The adapter path does not exist: adapters/team-architect\"}",
-  "context": "Tool call: handoff_to",
-  "steps_taken": []
-}

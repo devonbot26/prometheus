@@ -1,8 +1,0 @@
-{
-  "id": "ERR-045",
-  "timestamp": "2026-02-28T02:22:13.207Z",
-  "status": "active",
-  "error": "Note not found: projects/minicraft-mac/SPRINT_SPECS.md",
-  "context": "Tool call: obsidian_read_note",
-  "steps_taken": []
-}

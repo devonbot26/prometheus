@@ -1,8 +1,0 @@
-{
-  "id": "ERR-050",
-  "timestamp": "2026-02-28T03:00:17.182Z",
-  "status": "active",
-  "error": "Invalid role \"agent_team\". Valid roles are: architect, coder, designer, qa.",
-  "context": "Tool call: handoff_to",
-  "steps_taken": []
-}

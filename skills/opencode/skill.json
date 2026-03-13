@@ -1,0 +1,32 @@
+{
+    "name": "opencode",
+    "description": "Integration skill for handing off complex coding tasks to the external OpenCode agent.",
+    "tools": [
+        {
+            "name": "handoff_to_opencode",
+            "path": "index.js",
+            "function": "handoff_to_opencode",
+            "description": "Delegate a complex coding task (multi-file, refactor, search) to the external OpenCode agent. This tool runs the 'opencode run' CLI command and captures its output.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "The detailed instructions for the coding task. Include context about the files to modify."
+                    },
+                    "project_path": {
+                        "type": "string",
+                        "description": "Optional: Absolute path to the directory where OpenCode should execute."
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "Optional: Model identifier to pass to OpenCode (e.g., 'anthropic/claude-3-5-sonnet-20240620')."
+                    }
+                },
+                "required": [
+                    "prompt"
+                ]
+            }
+        }
+    ]
+}

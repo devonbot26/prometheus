@@ -1,8 +1,0 @@
-{
-  "id": "ERR-052",
-  "timestamp": "2026-02-28T23:13:20.892Z",
-  "status": "active",
-  "error": "\"self-coder\" is a skill name, not a tool name. Available tools in this skill: create_draft_skill, consult_senior_dev, install_skill, switch_model, read_file, apply_patch",
-  "context": "Tool call: self-coder",
-  "steps_taken": []
-}

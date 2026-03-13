@@ -1,8 +1,0 @@
-{
-  "id": "ERR-055",
-  "timestamp": "2026-03-01T03:34:51.603Z",
-  "status": "active",
-  "error": "Unknown tool: obsidian_librarian",
-  "context": "Tool call: obsidian_librarian",
-  "steps_taken": []
-}

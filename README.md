@@ -8,6 +8,9 @@ Project Prometheus is a custom AI assistant framework designed for maximum user 
 *   **Dynamic Skill System**: Droppable folder-based skill system that allows for seamless persona switching (e.g., Librarian, Sys-Admin, Lead Researcher).
 *   **Autonomous Chaining**: Agents like the Lead Researcher can execute multi-step plans (e.g., scraping GitHub, analyzing Reddit sentiment, outputting Markdown) without manual intervention.
 *   **Integrated Memory**: Stores long-term context in a local SQLite/Vector database and directly interfaces with Obsidian Notebooks for human-readable tracking.
+*   **High-Performance Streaming**: Near-zero TTFT using NDJSON streams for local MLX models, matching OpenCode performance.
+*   **Safety Guards**: Integrated mid-stream watchdog and context pruning to prevent model repetition loops.
+*   **OpenCode UI**: Premium vertically-bordered CLI with real-time dimmed reasoning blocks.
 
 ## 🤖 16 Specialized Skills
 

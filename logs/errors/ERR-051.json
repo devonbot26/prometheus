@@ -1,8 +1,0 @@
-{
-  "id": "ERR-051",
-  "timestamp": "2026-02-28T03:09:43.057Z",
-  "status": "active",
-  "error": "setModelOverride is not defined",
-  "context": "Tool call: switch_model",
-  "steps_taken": []
-}

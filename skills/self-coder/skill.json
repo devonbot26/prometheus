@@ -133,6 +133,78 @@
                     "required": true
                 }
             }
+        },
+        "checkpoint": {
+            "path": "index.js",
+            "function": "checkpoint",
+            "description": "Creates a Git-based save point (tag) for a file before making risky changes.",
+            "parameters": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to the file to checkpoint",
+                    "required": true
+                },
+                "label": {
+                    "type": "string",
+                    "description": "Description of why this checkpoint is being made"
+                }
+            }
+        },
+        "rollback_patch": {
+            "path": "index.js",
+            "function": "rollback_patch",
+            "description": "Restores a file to its last healthy state using Git. Useful after a patch breaks syntax.",
+            "parameters": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to the file to roll back",
+                    "required": true
+                },
+                "tag": {
+                    "type": "string",
+                    "description": "Optional: Specific Git tag to restore from"
+                }
+            }
+        },
+        "verify_syntax": {
+            "path": "index.js",
+            "function": "verify_syntax",
+            "description": "Validates that a JavaScript file is syntactically correct and won't crash on import.",
+            "parameters": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to the .js file to verify",
+                    "required": true
+                }
+            }
+        },
+        "run_quick_test": {
+            "path": "index.js",
+            "function": "run_quick_test",
+            "description": "Executes a temporary JS test script to verify functional correctness of a fix.",
+            "parameters": {
+                "test_code": {
+                    "type": "string",
+                    "description": "The full JavaScript code for the test script",
+                    "required": true
+                }
+            }
+        },
+        "adjust_intent_priority": {
+            "path": "index.js",
+            "function": "adjust_intent_priority",
+            "description": "Adjust the prioritization boost for a specific tool. Use this when the user corrects your tool selection or gives explicit priority instructions.",
+            "parameters": {
+                "skill_id": {
+                    "type": "string",
+                    "description": "The ID of the skill to boost (e.g., 'gmail', 'knowledge-base')",
+                    "required": true
+                },
+                "boost": {
+                    "type": "number",
+                    "description": "The amount to increase/decrease priority. Default is 5. Use negative numbers to decrease."
+                }
+            }
         }
     }
 }

@@ -1,8 +1,0 @@
-{
-  "id": "ERR-056",
-  "timestamp": "2026-03-01T03:35:15.584Z",
-  "status": "active",
-  "error": "\"obsidian\" is a skill name, not a tool name. Available tools in this skill: obsidian_list_notes, obsidian_read_note, obsidian_write_note, obsidian_append_note, obsidian_search, obsidian_create_canvas",
-  "context": "Tool call: obsidian",
-  "steps_taken": []
-}

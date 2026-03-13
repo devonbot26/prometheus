@@ -1,0 +1,66 @@
+{
+  "name": "youtube-downloader",
+  "description": "Downloads YouTube videos or playlists and converts them to high-quality 320kbps MP3 audio files.",
+  "intent": {
+    "triggers": [
+      "download youtube",
+      "convert to mp3",
+      "download playlist",
+      "fetch audio",
+      "rip youtube",
+      "search for song",
+      "find and download"
+    ],
+    "context_hints": [
+      "music",
+      "podcast",
+      "study notes",
+      "audio"
+    ]
+  },
+  "streamable": true,
+  "timeout": 600,
+  "tools": {
+    "download_youtube_mp3": {
+      "description": "CRITICAL: You MUST use this tool instead of `terminal_run` for downloading YouTube videos. Downloads audio from a YouTube video or playlist URL and converts it to a 320kbps MP3 file. Handles long playlists safely with background heartbeats. The file is saved persistently in the downloads folder.",
+      "parameters": {
+        "url": {
+          "type": "string",
+          "description": "The full YouTube URL (e.g. https://www.youtube.com/watch?v=... or https://www.youtube.com/playlist?list=...)"
+        },
+        "output_dir": {
+          "type": "string",
+          "description": "Optional: Specific directory to save the MP3s to. Defaults to downloads/youtube."
+        },
+        "smart_rename": {
+          "type": "boolean",
+          "description": "Optional: If true, uses the local 9B model to 'cleverly' rename the file into 'Artist - Song' format, removing junk titles. Defaults to true."
+        }
+      },
+      "required": ["url"]
+    },
+    "search_and_download_mp3": {
+      "description": "Searches for a song by artist and/or song name (supports English and Traditional Chinese), identifies the best match (e.g., official audio/high quality), downloads it, and converts it to a 320kbps MP3.",
+      "parameters": {
+        "query": {
+          "type": "string",
+          "description": "The artist and song name to search for (e.g., 'Coldplay Yellow' or '陳奕迅 淘汰')."
+        },
+        "output_dir": {
+          "type": "string",
+          "description": "Optional: Specific directory to save the MP3. Defaults to downloads/youtube."
+        }
+      },
+      "required": ["query"]
+    },
+    "organize_library": {
+      "description": "Scans the existing music library, applies 'Clever Rename' to all files, and resolve duplicates by keeping the highest quality version. Useful for fixing messy filename formats and cleaning up the collection.",
+      "parameters": {
+        "directory": {
+          "type": "string",
+          "description": "Optional: Specific directory to organize. Defaults to downloads/youtube."
+        }
+      }
+    }
+  }
+}

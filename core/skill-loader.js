@@ -73,10 +73,14 @@ export function loadSkills() {
  * @param {object} args - tool arguments
  * @returns {Promise<any>}
  */
-export async function executeTool(skills, toolName, args = {}) {
+export async function executeTool(skills, toolName, args = {}, options = {}) {
     for (const [name, skill] of skills) {
         if (skill.toolNames.includes(toolName)) {
             const toolDef = skill.meta.tools[toolName];
+
+            // If it's a virtual/MCP skill, it won't have a dir. Skip path joining.
+            if (!skill.dir) continue;
+
             const modulePath = path.join(skill.dir, toolDef.path || 'index.js');
 
             // Dynamic import (supports both ESM and CJS via .cjs)
@@ -88,7 +92,7 @@ export async function executeTool(skills, toolName, args = {}) {
             }
 
             console.log(`🔧 Running ${name}/${toolName}...`);
-            return await fn(args);
+            return await fn(args, options);
         }
     }
 
@@ -131,7 +135,7 @@ export function getToolDescriptions(skills) {
 export function getSkillSummaries(skills) {
     const summaries = [];
     for (const [name, skill] of skills) {
-        summaries.push(`- **${name}**: ${skill.meta.description || 'No description'} [tools: ${skill.toolNames.join(', ')}]`);
+        summaries.push(`- **${name}**: ${skill.meta.description || 'No description'}`);
     }
     return summaries.join('\n');
 }
@@ -157,6 +161,31 @@ export function getToolDescriptionsForSkills(skills, skillNames) {
                 }).join(', ')
                 : 'none';
             descriptions.push(`- ${toolName}: ${tool.description} [params: ${params}]`);
+        }
+    }
+    return descriptions.join('\n');
+}
+
+/**
+ * Get descriptions for specific tool names across all loaded skills
+ * @param {Map} skills - loaded skills map
+ * @param {string[]} requiredToolNames - exact names of tools to extract
+ */
+export function getSpecificToolDescriptions(skills, requiredToolNames) {
+    const descriptions = [];
+    for (const [skillName, skill] of skills) {
+        for (const toolName of skill.toolNames) {
+            if (requiredToolNames.includes(toolName)) {
+                const tool = skill.meta.tools[toolName];
+                const params = tool.parameters
+                    ? Object.entries(tool.parameters).map(([k, v]) => {
+                        const type = v.type || (typeof v === 'string' ? 'string' : 'any');
+                        const desc = v.description || (typeof v === 'string' ? v : '');
+                        return `${k}: ${type}${v.required ? ' (required)' : ' (optional)'} - ${desc}`;
+                    }).join(', ')
+                    : 'none';
+                descriptions.push(`- ${toolName}: ${tool.description} [params: ${params}]`);
+            }
         }
     }
     return descriptions.join('\n');

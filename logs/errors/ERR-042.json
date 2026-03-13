@@ -1,8 +1,0 @@
-{
-  "id": "ERR-042",
-  "timestamp": "2026-02-28T01:54:43.988Z",
-  "status": "active",
-  "error": "pyenv: python: command not found\n\nThe `python' command exists in these Python versions:\n  3.12.5\n\nNote: See 'pyenv help global' for tips on allowing both\n      python2 and python3 to be found.\n",
-  "context": "Tool call: terminal_run",
-  "steps_taken": []
-}

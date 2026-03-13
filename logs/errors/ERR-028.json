@@ -1,8 +1,0 @@
-{
-  "id": "ERR-028",
-  "timestamp": "2026-02-24T17:11:09.313Z",
-  "status": "active",
-  "error": "Failed to fetch weather for Charlottetoen, PE (Both providers failed).",
-  "context": "Tool call: get_weather",
-  "steps_taken": []
-}

@@ -4,11 +4,11 @@
     "tools": {
         "handoff_to": {
             "path": "index.js",
-            "description": "Switches the current Prometheus persona to a specialized role. Calling this tool will immediately yield control to the next agent autonomously.",
+            "description": "DELEGATE TO TIER 2 (INTERNAL): Switches the persona to a specialized local role (e.g. team-architect, team-coder). ONLY use for simple logic, fast patches, or maintenance tasks.",
             "parameters": {
                 "role": {
                     "type": "string",
-                    "description": "The name of the role to switch to (e.g., 'team-architect', 'team-coder').",
+                    "description": "The name of the role to switch to (e.g., 'team-architect', 'team-coder'). Any role defined in the project's 'roles/' directory is valid.",
                     "required": true
                 },
                 "context": {
@@ -85,7 +85,7 @@
                             },
                             "assignee": {
                                 "type": "string",
-                                "description": "The target role for this step (e.g., 'team-coder', 'team-researcher')."
+                                "description": "The target role for this step (e.g., 'team-coder' for local, 'team-opencode' for high-power coding)."
                             }
                         },
                         "required": [
@@ -120,6 +120,16 @@
                     "description": "A brief summary of what happened during the step."
                 }
             }
+        },
+        "recover_stalled_task": {
+            "path": "index.js",
+            "description": "Scans TASK_TIMERS.json for expired timers. Resets any stalled tasks back to 'pending' so they can be re-delegated. Use this when a worker has not responded past their deadline.",
+            "parameters": {}
+        },
+        "reset_team_state": {
+            "path": "index.js",
+            "description": "Clears all persistent team state (handoffs, tasks, plans, and timers) for a clean session startup.",
+            "parameters": {}
         }
     }
 }

@@ -1,8 +1,0 @@
-{
-  "id": "ERR-032",
-  "timestamp": "2026-02-24T17:22:46.922Z",
-  "status": "active",
-  "error": "Git sync failed: Command failed: git push\nerror: RPC failed; HTTP 500 curl 22 The requested URL returned error: 500\nsend-pack: unexpected disconnect while reading sideband packet\nfatal: the remote end hung up unexpectedly\nEverything up-to-date\n",
-  "context": "Tool call: git_sync",
-  "steps_taken": []
-}

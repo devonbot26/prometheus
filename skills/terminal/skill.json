@@ -15,6 +15,28 @@
                     "required": true
                 }
             }
+        },
+        "peek_buffer": {
+            "path": "bridge.js",
+            "function": "peek_buffer",
+            "description": "Read a specific chunk of a Shadow Buffer. Use this when tool output was too large and saved to a buffer pointer.",
+            "parameters": {
+                "buffer_id": {
+                    "type": "string",
+                    "description": "The ID of the shadow buffer (e.g. 'buffer_171028...')",
+                    "required": true
+                },
+                "start_line": {
+                    "type": "number",
+                    "description": "The starting line number to read",
+                    "required": true
+                },
+                "lines": {
+                    "type": "number",
+                    "description": "Total number of lines to read (max 500)",
+                    "required": true
+                }
+            }
         }
     }
 }

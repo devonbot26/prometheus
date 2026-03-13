@@ -1,8 +1,0 @@
-{
-  "id": "ERR-022",
-  "timestamp": "2026-02-24T04:00:41.036Z",
-  "status": "active",
-  "error": "Unknown tool: collab-board",
-  "context": "Tool call: collab-board",
-  "steps_taken": []
-}

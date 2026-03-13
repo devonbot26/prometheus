@@ -10,14 +10,30 @@ import path from 'path';
 import { Agent } from '../core/agent.js';
 import { initCronJobs } from '../core/cron.js';
 import { logDebug, toggleDebug } from '../core/logger.js';
+import { mcpManager } from '../core/mcp-client.js';
 
 logDebug('[DEBUG] Loading channels/cli.js...');
 
 const HANDOFF_PATH = path.resolve(process.cwd(), 'HANDOFF.json');
+const PM_STATE_PATH = path.resolve(process.cwd(), 'PM_STATE.json');
 const MAX_AUTO_CONTINUES = 10;
 let autoStep = 0;
 
+function sendActivity(type, data = {}) {
+    if (process.send && process.connected) {
+        try {
+            process.send({ type, ...data });
+        } catch (e) {
+            // Channel closed
+        }
+    }
+}
+
+// Initialize MCP and Agent
+await mcpManager.initialize();
 const agent = new Agent();
+agent.registerExternalSkills(mcpManager.getCapabilitiesAsNativeSkills());
+
 let lastTps = 0;
 
 // Start background cron scheduler
@@ -31,6 +47,141 @@ const rl = readline.createInterface({
     output: process.stdout
 });
 
+const cmdLinePrompt = process.argv.slice(process.argv.indexOf('--prompt') + 1).join(' ');
+console.log(`[DEBUG] Detected prompt: "${cmdLinePrompt}"`);
+
+function createStreamHandler() {
+    let streamHasStarted = false;
+    let isNewLine = true;
+    let currentColor = '';
+
+    return (chunk, isReasoning) => {
+        if (!agent.showThinking && isReasoning) return;
+
+        if (!streamHasStarted) {
+            console.log('');
+            streamHasStarted = true;
+        }
+
+        let out = '';
+        const targetColor = isReasoning ? '\x1b[2m' : '';
+
+        // If color changed mid-line
+        if (targetColor !== currentColor) {
+            out += '\x1b[0m' + targetColor;
+            currentColor = targetColor;
+        }
+
+        for (let i = 0; i < chunk.length; i++) {
+            if (isNewLine) {
+                out += '     ';
+                isNewLine = false;
+            }
+
+            out += chunk[i];
+
+            if (chunk[i] === '\n') {
+                isNewLine = true;
+            }
+        }
+
+        process.stdout.write(out);
+    };
+}
+
+async function handleResponse(response, streamed = false) {
+    lastTps = response.tps || 0;
+    const tpsVal = response.tps ? parseFloat(response.tps).toFixed(1) : '0.0';
+
+    // Reset any bleeding colors
+    process.stdout.write('\x1b[0m');
+
+    if (!streamed || response.model === 'watchdog-guard') {
+        if (!streamed) console.log('');
+        if (agent.showThinking && response.reasoning && response.reasoning !== response.text) {
+            const thoughtLines = response.reasoning.split('\n');
+            for (const line of thoughtLines) {
+                console.log(`     \x1b[2m${line}\x1b[0m`);
+            }
+            console.log('');
+        }
+
+        const textLines = response.text.split('\n');
+        for (const line of textLines) {
+            console.log(`     ${line}`);
+        }
+    } else {
+        console.log(''); // Newline after stream finishes to pad the footer
+    }
+
+    console.log('');
+    console.log(`     \x1b[36m▣\x1b[0m  \x1b[2m${agent.activeMode} · ${response.model} · ${tpsVal} tok/s\x1b[0m`);
+    console.log('');
+
+    if (response.auto_continue && autoStep < MAX_AUTO_CONTINUES) {
+        autoStep++;
+        try {
+            if (fs.existsSync(HANDOFF_PATH)) {
+                const handoff = JSON.parse(fs.readFileSync(HANDOFF_PATH, 'utf-8'));
+                const wakeUp = `[SYSTEM] You are now the ${handoff.to}. Your task: ${handoff.context}`;
+                console.log(`\n🤖 Auto-Continue [Step ${autoStep}/${MAX_AUTO_CONTINUES}]: Waking ${handoff.to}...\n`);
+
+                agent.setMode(handoff.to);
+
+                const streamCb = createStreamHandler();
+                const nextResponse = await agent.process(wakeUp, undefined, streamCb);
+                return handleResponse(nextResponse, true);
+            }
+        } catch (e) {
+            console.error(`❌ Relay Error: ${e.message}`);
+        }
+    }
+
+    if (!response.auto_continue && autoStep > 0 && autoStep < MAX_AUTO_CONTINUES) {
+        if (fs.existsSync(PM_STATE_PATH)) {
+            try {
+                const state = JSON.parse(fs.readFileSync(PM_STATE_PATH, 'utf-8'));
+                const pending = state.steps.filter(s => s.status === 'pending');
+                if (pending.length > 0) {
+                    autoStep++;
+                    agent.setMode('team-manager');
+                    const currentStepId = state.current_step_id;
+                    const nudge = `[SYSTEM] You are Niki (PM). A worker just completed their task for step ${currentStepId}. You MUST now call mark_step_done (step_id: ${currentStepId}, status: "completed") and then call get_next_step to continue the plan. Do NOT ask the user anything.`;
+                    console.log(`\n🔄 [PM RESUME] Auto-nudging Niki to continue plan. Pending: ${pending.length} steps.\n`);
+                    const streamCb = createStreamHandler();
+                    const nextResponse = await agent.process(nudge, undefined, streamCb);
+                    return handleResponse(nextResponse, true);
+                }
+            } catch (e) {
+                console.error(`❌ [PM RESUME] Failed to check plan state: ${e.message}`);
+            }
+        }
+    }
+
+    // Chain complete or cap reached
+    if (autoStep > 0) {
+        autoStep = 0;
+        agent.setMode('primary');
+        console.log('✅ Agent relay complete. Returning to primary mode.');
+    }
+
+    if (!cmdLinePrompt) ask(); // Only ask if not in batch mode
+}
+
+async function runPrompt(text) {
+    console.log(`[DEBUG] Starting runPrompt with: "${text}"`);
+    try {
+        const streamCb = createStreamHandler();
+        const response = await agent.process(text, undefined, streamCb);
+        await handleResponse(response, true);
+        if (cmdLinePrompt) process.exit(0);
+    } catch (e) {
+        console.error(`\n❌ Error: ${e.message}\n`);
+        if (cmdLinePrompt) process.exit(1);
+        ask();
+    }
+}
+
 console.log('');
 console.log('🔥 Project Prometheus — Devon v2.0');
 console.log('   Type your message. "/?" for help, "quit" to exit.');
@@ -40,12 +191,23 @@ console.log('');
 function ask() {
     const model = (process.env.LLM_MODEL || 'default').split('/').pop();
     const mode = agent.activeMode;
-    const tps = lastTps > 0 ? ` | ${lastTps} t/s` : '';
 
-    // Metadata block: [Model | Mode | TPS]
-    const metadata = `\x1b[2m[${model} | ${mode}${tps}]\x1b[0m`;
+    console.log(`\n  \x1b[36m┃\x1b[0m  \x1b[1m${mode}\x1b[0m  \x1b[2m${model}\x1b[0m`);
+    console.log(`  \x1b[36m╹\x1b[0m\x1b[36m${'▀'.repeat(70)}\x1b[0m`);
 
-    rl.question(`${metadata} You: `, async (input) => {
+    // GEP Gene: Auto-Resume Project Loop
+    if (mode === 'primary' && fs.existsSync(PM_STATE_PATH) && !global.hasNudged) {
+        global.hasNudged = true;
+        console.log(`\n🤖 [AUTO-RESUME] Project plan detected. Switching to team-manager...\n`);
+        agent.setMode('team-manager');
+        const streamCb = createStreamHandler();
+        agent.process('get_next_step', undefined, streamCb).then(res => handleResponse(res, true));
+        return;
+    }
+
+    rl.question(`  \x1b[36m┃\x1b[0m  \x1b[1m>\x1b[0m `, async (input) => {
+        sendActivity('ACTIVITY');
+
         const trimmed = input.trim();
         logDebug(`[DEBUG] Received input: "${trimmed}"`);
         if (!trimmed) return ask();
@@ -53,10 +215,10 @@ function ask() {
         if (trimmed.toLowerCase() === 'quit' || trimmed.toLowerCase() === 'exit') {
             console.log('\n👋 See you later!');
             rl.close();
-            // Signal the parent launcher so it can kill the Llama server
             if (process.send) {
-                process.send({ type: 'SHUTDOWN' });
+                sendActivity('SHUTDOWN');
             }
+
             setTimeout(() => process.exit(0), 100);
             return;
         }
@@ -88,6 +250,8 @@ function ask() {
                 console.log('  /file [path]       Process a long-form prompt from file');
                 console.log('  /clear /reset      Wipe conversation history/memory');
                 console.log('  /debug             Toggle verbose developer logs');
+                console.log('  /think-toggle      Toggle thinking display');
+                console.log('  /think-on/off      Explicit thinking control');
                 console.log('  /think [msg]       Use internal reasoning block');
                 console.log('  /podcast /exam     Specialized notebook skills');
                 console.log('  quit / exit        Shutdown Prometheus and Llama server');
@@ -123,23 +287,42 @@ function ask() {
                 const arg = args[1];
                 const MODEL_ID_MAP = {
                     '1': 'mlx-community/Qwen3.5-4B-4bit',
-                    '2': 'mlx-community/Qwen3.5-9B-4bit'
+                    '2': 'mlx-community/Qwen3.5-9B-Instruct-4bit',
+                    '3': 'mlx-community/Llama-3.1-8B-Instruct-4bit'
                 };
-
-                const model = MODEL_ID_MAP[arg] || arg;
-
-                if (!arg) {
-                    console.log(`\n🤖 Current Model: \x1b[1m${process.env.LLM_MODEL || 'default'}\x1b[0m`);
-                    console.log(`   Suggestions:`);
-                    console.log(`    [1] mlx-community/Qwen3.5-4B-4bit (Fastest)`);
-                    console.log(`    [2] mlx-community/Qwen3.5-9B-4bit (Stronger)`);
-                    console.log(`   Usage: /model <id or model_name>\n`);
+                const modelId = MODEL_ID_MAP[arg] || arg;
+                if (!modelId) {
+                    console.log(`\n🧠 Switch model: /model [id|name]`);
+                    console.log(`   Presets: 1(Qwen4B), 2(Qwen9B), 3(Llama8B)\n`);
                 } else {
-                    console.log(`\n🔄 Requesting model switch to: ${model}...\n`);
                     if (process.send) {
-                        process.send({ type: 'RESTART_LLAMA', model: model });
+                        sendActivity('RESTART_LLAMA', { model: modelId });
+                        console.log(`\n🔄 [REQUEST] Switching model to: ${modelId}... (Server will restart)\n`);
+                    } else {
+                        console.error('❌ Error: This command requires the Prometheus Manager (prom.js) as supervisor.');
                     }
                 }
+                ask();
+                return;
+            }
+
+            if (cmd === '/think-toggle') {
+                agent.showThinking = !agent.showThinking;
+                console.log(`\n🧠 Thinking display is now ${agent.showThinking ? 'ON' : 'OFF'}\n`);
+                ask();
+                return;
+            }
+
+            if (cmd === '/think-on') {
+                agent.showThinking = true;
+                console.log(`\n🧠 Thinking display is now ON\n`);
+                ask();
+                return;
+            }
+
+            if (cmd === '/think-off') {
+                agent.showThinking = false;
+                console.log(`\n🧠 Thinking display is now OFF\n`);
                 ask();
                 return;
             }
@@ -197,8 +380,9 @@ function ask() {
                 try {
                     const content = fs.readFileSync(filePath, 'utf-8');
                     console.log(`\n📄 Loaded prompt from ${filePath}\n`);
-                    const response = await agent.process(content);
-                    await handleResponse(response);
+                    const streamCb = createStreamHandler();
+                    const response = await agent.process(content, undefined, streamCb);
+                    await handleResponse(response, true);
                 } catch (e) {
                     console.error(`❌ Failed to load or process file: ${e.message}`);
                     ask();
@@ -207,51 +391,22 @@ function ask() {
             }
         }
 
-        async function handleResponse(response) {
-            lastTps = response.tps || 0;
-            const speedStr = response.tps ? ` (${response.tps} tok/s)` : '';
-            if (response.reasoning && response.reasoning !== response.text) {
-                console.log(`\n\x1b[2m[Thinking...]\x1b[0m\n\x1b[2m${response.reasoning}\x1b[0m`);
-            }
-            console.log(`\nDevon [${response.model}]${speedStr}: ${response.text}\n`);
-
-            if (response.auto_continue && autoStep < MAX_AUTO_CONTINUES) {
-                autoStep++;
-                try {
-                    if (fs.existsSync(HANDOFF_PATH)) {
-                        const handoff = JSON.parse(fs.readFileSync(HANDOFF_PATH, 'utf-8'));
-                        const wakeUp = `[SYSTEM] You are now the ${handoff.to}. Your task: ${handoff.context}`;
-                        console.log(`\n🤖 Auto-Continue [Step ${autoStep}/${MAX_AUTO_CONTINUES}]: Waking ${handoff.to}...\n`);
-
-                        // Phase 8: Fix CLI Identity Bleed - ensure the agent mode actually switches!
-                        agent.setMode(handoff.to);
-
-                        const nextResponse = await agent.process(wakeUp);
-                        return handleResponse(nextResponse);
-                    }
-                } catch (e) {
-                    console.error(`❌ Relay Error: ${e.message}`);
-                }
-            }
-
-            // Chain complete or cap reached
-            if (autoStep > 0) {
-                autoStep = 0;
-                agent.setMode('primary');
-                console.log('✅ Agent relay complete. Returning to primary mode.');
-            }
-
-            ask();
-        }
-
         try {
-            const response = await agent.process(trimmed);
-            await handleResponse(response);
+            const streamCb = createStreamHandler();
+            const response = await agent.process(trimmed, undefined, streamCb);
+            await handleResponse(response, true);
         } catch (e) {
             console.error(`\n❌ Error: ${e.message}\n`);
+            if (e.message.includes('fetch failed') || e.message.includes('ECONNREFUSED')) {
+                if (process.send) sendActivity('RESTART_LLAMA');
+            }
             ask();
         }
     });
 }
 
-ask();
+if (cmdLinePrompt && cmdLinePrompt.length > 0) {
+    runPrompt(cmdLinePrompt);
+} else {
+    ask();
+}

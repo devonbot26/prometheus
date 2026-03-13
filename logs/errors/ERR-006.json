@@ -1,8 +1,0 @@
-{
-  "id": "ERR-006",
-  "timestamp": "2026-02-19T00:00:17.451Z",
-  "status": "active",
-  "error": "Cloning into 'wifite'...\nremote: Repository not found.\nfatal: repository 'https://github.com/ivan-senal/wifite.git/' not found\n",
-  "context": "Tool call: terminal_run",
-  "steps_taken": []
-}
