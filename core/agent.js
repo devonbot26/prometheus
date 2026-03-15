@@ -61,6 +61,15 @@ const PLAN_CONTEXT_PATH = path.join(__dirname, '.plan_context.json');
 
 import { EventEmitter } from 'events';
 
+export const ROLE_MODEL_MAP = {
+    'team-architect': { modelId: process.env.LLM_MODEL_REASONER || process.env.LLM_MODEL, forceLocal: true, maxTokens: 4096 },
+    'team-coder': { modelId: process.env.LLM_MODEL_CODER || process.env.LLM_MODEL, forceLocal: true, maxTokens: 4096 },
+    'team-designer': { modelId: process.env.LLM_MODEL_REASONER || process.env.LLM_MODEL, forceLocal: true, maxTokens: 4096 },
+    'team-qa': { modelId: process.env.LLM_MODEL_CODER || process.env.LLM_MODEL, forceLocal: true, maxTokens: 4096 },
+    'team-researcher': { modelId: process.env.LLM_MODEL_REASONER || process.env.LLM_MODEL, forceLocal: true, maxTokens: 4096 },
+    'team-manager': { modelId: process.env.LLM_MODEL_MANAGER || process.env.LLM_MODEL, forceLocal: true, deepThinking: true, maxTokens: 4096 }
+};
+
 export class Agent extends EventEmitter {
     constructor() {
         super();
@@ -75,6 +84,7 @@ export class Agent extends EventEmitter {
         this.memoryState = 'healthy';
         this.taskStartedAt = null;
         this.showThinking = process.env.SHOW_THINKING !== 'false';
+        this.disabledSkills = new Set();
 
         this.config = {
             self_healing: process.env.SELF_HEALING_ENABLED !== 'false'
@@ -194,6 +204,15 @@ export class Agent extends EventEmitter {
         } catch (e) {
             console.error('⚠️ Failed to save plan context:', e.message);
         }
+    }
+
+    toggleSkill(name, enabled) {
+        if (enabled) {
+            this.disabledSkills.delete(name);
+        } else {
+            this.disabledSkills.add(name);
+        }
+        console.log(`🔧 [AGENT] Skill "${name}" is now ${enabled ? 'ENABLED' : 'DISABLED'}`);
     }
 
     /**
@@ -376,7 +395,10 @@ export class Agent extends EventEmitter {
             } catch (e) { /* silent */ }
         }
 
-        const { skills: detectedSkills, debug } = await resolveIntent(userMessage, recentHistory, this.skills, lastError);
+        const { skills: rawDetectedSkills, debug } = await resolveIntent(userMessage, recentHistory, this.skills, lastError);
+        
+        // Filter out disabled skills
+        const detectedSkills = rawDetectedSkills.filter(s => !this.disabledSkills.has(s));
 
         // Autonomous Escalation: If we detect a loop (repeats >= 3), force escalate to 9B
         if (debug && debug.loops >= 3 && process.env.LLM_MODEL_9B && process.env.LLM_MODEL !== process.env.LLM_MODEL_9B) {
@@ -499,10 +521,14 @@ export class Agent extends EventEmitter {
             // AUTO-MODE DETECTION
             if (this.activeMode === 'primary') {
                 const lowerMsg = cleanMessage.toLowerCase();
+                const teamKeywords = ['team', 'handoff', 'delegate', 'manager', 'niki', 'setup the team'];
                 const planKeywords = ['design', 'architect', 'plan', 'outline', 'architecture'];
                 const buildKeywords = ['write', 'implement', 'code', 'build', 'fix', 'script'];
 
-                if (planKeywords.some(kw => lowerMsg.includes(kw))) {
+                if (teamKeywords.some(kw => lowerMsg.includes(kw))) {
+                    console.log(`🧠 Auto-detect: Switching to 'team-manager' mode`);
+                    this.setMode('team-manager');
+                } else if (planKeywords.some(kw => lowerMsg.includes(kw))) {
                     console.log(`🧠 Auto-detect: Switching to 'plan' mode`);
                     this.setMode('plan');
                 } else if (buildKeywords.some(kw => lowerMsg.includes(kw))) {
@@ -516,9 +542,12 @@ export class Agent extends EventEmitter {
             let dynamicTools;
             if (this.activeMode === 'chat') {
                 dynamicTools = "";
+            } else if (this.activeMode === 'prompt-engineer') {
+                dynamicTools = "";
+                console.log('📝 [DRAFT MODE] Zero tools active. Prometheus is strictly meta-prompting.');
             } else if (this.activeMode === 'team-manager') {
-                dynamicTools = getToolDescriptionsForSkills(this.skills, ['team-manager', 'opencode']);
-                console.log('🎯 [PM MODE] Tool isolation active. Niki can only see management and opencode tools.');
+                dynamicTools = getToolDescriptionsForSkills(this.skills, ['team-manager', 'opencode', 'knowledge-base', 'terminal']);
+                console.log('🎯 [PM MODE] Tool isolation active. Niki can see management, opencode, knowledge, and terminal tools.');
             } else if (this.activeMode.startsWith('team-')) {
                 // Phase 17: Strict Tool Masking for Sub-Agents
                 const baseTools = getToolDescriptionsForSkills(this.skills, ['terminal', 'self-coder', 'sys-admin']);
@@ -553,7 +582,9 @@ You are **PROMETHEUS**, a highly advanced agentic AI orchestrator.
 - **PRIORITIZATION**: If found internally, ALWAYS prioritize local documentation (README.md, ROLES.md) and code analysis over 'web_search'.\n\n` + basePrompt + memorySnippet;
 
             // PAIRED SYSTEM PROMPTS (Reinforce the mode behavior)
-            if (this.activeMode === 'chat') {
+            if (this.activeMode === 'prompt-engineer') {
+                finalPrompt = "You are an Expert Prompt Engineer. The user will give you a rough idea or objective. You must ask 1-2 highly specific technical questions to clarify the scope, edge cases, and architecture. Once the user answers, you must generate a comprehensive, highly-detailed final prompt that the user can send to an Agentic AI system for execution. You MUST output your final prompt inside a ```prompt-draft``` block.\n\n" + finalPrompt;
+            } else if (this.activeMode === 'chat') {
                 finalPrompt = "You are in CHAT mode. You are a helpful conversational assistant. Talk naturally with the user. You do NOT have access to tools or skills in this mode, so do not try to use any. Focus on providing high-quality text-based answers.\n\n" + finalPrompt;
             } else if (this.activeMode === 'team-manager') {
                 // Inject Priority Matrix Reinforcement for PM Mode
@@ -567,12 +598,12 @@ You are **PROMETHEUS**, a highly advanced agentic AI orchestrator.
             } else if (this.activeMode === 'plan') {
                 const isMedia = (cleanMessage.toLowerCase() + (dynamicTools || '')).includes('youtube') || (cleanMessage.toLowerCase() + (dynamicTools || '')).includes('mp3');
                 if (!isMedia) {
-                    finalPrompt = "You are in PLAN mode. You are a senior software architect. Output ONLY Markdown architecture docs, outlines, and plans. Never write code blocks.\n\n" + finalPrompt;
+                    finalPrompt = "You are in PLAN mode. You are a senior software architect. Use your tools (like 'query_knowledge' and 'save_plan') to research and document architecture. Output your findings as Markdown, but DO use tool blocks when actions are required. Never write implementation code blocks.\n\n" + finalPrompt;
                 } else {
                     console.log('⚡ [PLAN EXEMPTION] Allowing tool execution for media download despite PLAN mode.');
                 }
             } else if (this.activeMode === 'build') {
-                finalPrompt = "You are in BUILD mode. You are an expert software engineer. Output primarily production-ready code blocks. Explain briefly after.\n\n" + finalPrompt;
+                finalPrompt = "You are in BUILD mode. You are an expert software engineer. Focus on implementation. Output production-ready code blocks for the logic requested.\n\n" + finalPrompt;
             }
 
             // Phase 35: Inject Pinned Progress State (If any)
@@ -728,16 +759,6 @@ If you need to use a skill but don't see its parameters, use the following speci
             if (dynamicTools) {
                 console.log(`\x1b[33m🛠️ [DEBUG] DYNAMIC TOOLS INJECTED:\n${dynamicTools.substring(0, 1000)}...\x1b[0m`);
             }
-
-            // Prepare Model Routing
-            const ROLE_MODEL_MAP = {
-                'team-architect': { forceLocal: true, maxTokens: 4096 },
-                'team-coder': { forceLocal: true, maxTokens: 4096 },
-                'team-designer': { forceLocal: true, maxTokens: 4096 },
-                'team-qa': { forceLocal: true, maxTokens: 4096 },
-                'team-researcher': { forceLocal: true, maxTokens: 4096 },
-                'team-manager': { forceLocal: true, deepThinking: true, maxTokens: 4096 } // PM runs on 9B model
-            };
 
             const roleConfig = ROLE_MODEL_MAP[this.activeMode] ||
                 (this.activeMode.startsWith('team-') ? { forceLocal: true } : {});
@@ -905,16 +926,16 @@ If you need to use a skill but don't see its parameters, use the following speci
                     throw e;
                 }
             } catch (err) {
-                if (err.name === 'AbortError' || streamAborted || this.abortController.signal.aborted) {
-                    logDebugError('[DEBUG] Chat aborted.');
+                if (err.name === 'AbortError' || streamAborted || this.abortController?.signal?.aborted || err.message.includes('TIMEOUT')) {
+                    logDebugError(`[DEBUG] Chat interrupted or timed out: ${err.message}`);
                     
                     // Throw a specific error so the wrapper (like wait queue) knows it was an intentional abort
-                    if (!streamAborted && this.abortController.signal.aborted) {
+                    if (this.abortController?.signal?.aborted && !streamAborted) {
                         throw new Error("ABORTED_BY_USER");
                     }
                     
                     response = {
-                        text: "I encountered a processing error (loop detected) or was interrupted. How can I help you today?",
+                        text: "I encountered a processing timeout or was interrupted by the system watchdog. Generating a fallback response or retrying might help. How can I assist you now?",
                         model: "watchdog-guard",
                         usage: { total_tokens: 0 }
                     };
@@ -1010,13 +1031,20 @@ If you need to use a skill but don't see its parameters, use the following speci
                 processed = lines.join('\n');
 
                 // 4. Final sanitization
-                return processed
+                let final = processed
                     .replace(/<think>/gi, '')
                     .replace(/<\/think>/gi, '')
                     .replace(/<\|im_start\|>/g, '')
                     .replace(/<\|im_end\|>/g, '')
                     .replace(/<\|endoftext\|>/g, '')
                     .trim();
+
+                // 5. Empty Output Fallback (Prevents empty diamond in UI)
+                if (!final && reasoning) {
+                    return "My internal reasoning process is complete, but I have no additional verbal output. How can I assist you further?";
+                }
+
+                return final;
             };
 
             assistantText = cleanupAssistantText(response.text, sanitizationMetadata);
@@ -1137,8 +1165,12 @@ If you need to use a skill but don't see its parameters, use the following speci
                             finalTps = followUp.tps;
                         } else {
                             if (this.activeMode === 'team-manager' && dynamicTools && !dynamicTools.includes(`- ${toolCall.tool}:`)) {
-                                // Niki is isolated. Stop her from hallucinating execution tools.
-                                throw new Error(`MANAGER PROTOCOL VIOLATION: You are strictly forbidden from using "${toolCall.tool}". You must delegate this task using 'handoff_to' or 'delegate_task'.`);
+                                // Whitelist harmless info tools for Niki
+                                const WHITELIST = ['get_weather', 'weather', 'get_skill_details', 'diagnose_system_health'];
+                                if (!WHITELIST.includes(toolCall.tool)) {
+                                    // Niki is isolated. Stop her from hallucinating execution tools.
+                                    throw new Error(`MANAGER PROTOCOL VIOLATION: You are strictly forbidden from using "${toolCall.tool}". You must delegate this task using 'handoff_to' or 'delegate_task'.`);
+                                }
                             }
 
                             this.writeState(toolCall.tool, toolCall.args, cleanMessage);
@@ -1202,7 +1234,7 @@ If you need to use a skill but don't see its parameters, use the following speci
                             if (result && (result.auto_continue || result.next_mode)) {
                                 autoContinueFlag = true;
                             }
-                            autoContinueFlag = true; // Hardened: always continue if tools called
+
 
                             this.clearState();
 
@@ -1405,6 +1437,10 @@ If you need to use a skill but don't see its parameters, use the following speci
             }
 
             this.saveHistory();
+            
+            // Final Sanitization Pass (Ensures follow-ups and auto-heals are clean)
+            assistantText = cleanupAssistantText(assistantText, sanitizationMetadata);
+
             this.emit('message', {
                 role: 'assistant',
                 content: assistantText,

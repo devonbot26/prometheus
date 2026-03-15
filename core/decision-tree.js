@@ -13,7 +13,7 @@ import path from 'path';
  * Triggers: +3 points (Strong correlation)
  * Context Hints: +1 point (Weak correlation)
  */
-let INTENT_SCHEMA = {
+export let INTENT_SCHEMA = {
     'gmail': {
         triggers: ['email', 'gmail', 'inbox', 'draft', 'send mail', 'unread', 'new email', 'check inbox'],
         context_hints: ['message', 'contact', 'threads', 'reply', 'mail']

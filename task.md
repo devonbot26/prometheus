@@ -15,6 +15,17 @@
 - [x] Phase 3: Plan Context Preservation (`agent.js`)
     - [x] Save plan context summary before clearing history on handoff
     - [x] Inject saved context on boot when `PM_STATE.json` exists
+# Task: Debugging Backend Crash on Weather Query <!-- id: 0 -->
+
+## Status
+- [x] Investigate "Normal exit" in supervisor during weather query <!-- id: 1 -->
+- [x] Identify root cause of MLX "Address already in use" errors <!-- id: 2 -->
+- [x] Fix crash and ensure weather skill reliability <!-- id: 3 -->
+- [x] Preliminary research on exit points and logs <!-- id: 4 -->
+- [x] Fix ReferenceError in web_server.js <!-- id: 7 -->
+- [x] Update supervisor exit logic in prom.js <!-- id: 8 -->
+- [x] Whitelist `get_weather` for `team-manager` in `agent.js` <!-- id: 9 -->
+- [x] Execute fix and verify <!-- id: 6 -->
 - [x] Phase 4: Verification
     - [x] Test reboot with active plan → history repopulates
     - [x] Test feedback after reboot → agent resumes as PM

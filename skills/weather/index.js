@@ -27,7 +27,7 @@ async function node_geocoding_attempt(location) {
     const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=1&language=en&format=json`;
 
     try {
-        const res = await fetch(geoUrl);
+        const res = await fetch(geoUrl, { signal: AbortSignal.timeout(10000) });
         const data = await res.json();
         if (!data.results || data.results.length === 0) throw new Error("No coords found");
 
@@ -49,7 +49,7 @@ async function node_open_meteo_fetch(geoData, originalLocation) {
     const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,weather_code&timezone=auto`;
 
     try {
-        const res = await fetch(weatherUrl);
+        const res = await fetch(weatherUrl, { signal: AbortSignal.timeout(10000) });
         if (!res.ok) throw new Error("API returned " + res.status);
         const data = await res.json();
 

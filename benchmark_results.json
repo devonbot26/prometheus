@@ -1,0 +1,20 @@
+[
+  {
+    "testName": "Model M1 Distilled",
+    "ttftS": 8.241,
+    "tps": "8.83",
+    "totalTokens": 909,
+    "totalTimeS": "111.17",
+    "responseSnippet": "\n\n<reasoning>\nThe user wants an explanation of a specific race condition in Node.js process management.\nThe core issue is relying solely on port availability to determine if a child process is still running.\nI need to explain the scenario involving 'TIME_WAIT' sockets and PID recycling.\nI must wrap my reasoning in <reasoning> tags.\n</reasoning>\n\n<response>\nAs a systems architect, I can explain that relying on port availability to detect a dead process is a classic race condition known as the \"Zo...",
+    "hasReasoning": false
+  },
+  {
+    "testName": "Model M2 MXFP4",
+    "ttftS": 94.943,
+    "tps": "8.93",
+    "totalTokens": 143,
+    "totalTimeS": "110.96",
+    "responseSnippet": "\n\n# Race Condition in Node.js Process Manager with Port-Based Monitoring\n\n## System Architecture Overview\n\nIn many Node.js process managers (like PM2, nodemon, or custom supervisors), a common pattern for monitoring child processes involves:\n\n1. **Process Spawning**: A parent process spawns child processes\n2. **Port Binding**: Each child binds to a specific port\n3. **Periodic Monitoring**: The process manager periodically checks if ports are still in use\n4. **Process Replacement**: If a port app...",
+    "hasReasoning": false
+  }
+]

@@ -9,8 +9,8 @@ import fetch from 'node-fetch';
 // Configuration
 const LLAMA_PORT = 18888;
 const WEB_PORT = 3000;
-const CHECK_INTERVAL = 45000;
-const HEALTH_TIMEOUT = 5000;
+const CHECK_INTERVAL = 90000;
+const HEALTH_TIMEOUT = 120000; // Increased to 120s for slower model loads
 const STARTUP_SCRIPT = './scripts/start_llama.sh';
 
 // ANSI Colors
@@ -64,6 +64,27 @@ function logGepEvent(intent, signal, details) {
         appendFileSync(GEP_EVENTS_PATH, JSON.stringify(event) + '\n');
     } catch (e) {
         console.error(`${C.red}⚠️ GEP Log Failed: ${e.message}${C.reset}`);
+    }
+}
+
+/**
+ * Persistently updates the LLM_MODEL in the .env file
+ */
+function updateEnvModel(modelId) {
+    try {
+        const envPath = path.join(process.cwd(), '.env');
+        if (!existsSync(envPath)) return;
+        
+        let content = fs.readFileSync(envPath, 'utf8');
+        if (content.includes('LLM_MODEL=')) {
+            content = content.replace(/LLM_MODEL=.*(\r?\n|$)/, `LLM_MODEL=${modelId}$1`);
+        } else {
+            content += `\nLLM_MODEL=${modelId}\n`;
+        }
+        fs.writeFileSync(envPath, content);
+        console.log(`${C.green}💾 Persisted new model preference to .env: ${modelId}${C.reset}`);
+    } catch (e) {
+        console.error(`${C.red}⚠️ Failed to update .env: ${e.message}${C.reset}`);
     }
 }
 
@@ -130,6 +151,19 @@ async function getLoadedModels() {
 // Track the server process globally so we can kill it
 let serverProcess = null;
 let isRestarting = false;
+
+// MLX Lifecycle State
+let currentMlxState = 'offline'; 
+const broadcastState = (state, model) => {
+    currentMlxState = state;
+    if (global.uiProcess && global.uiProcess.connected) {
+        global.uiProcess.send({ 
+            type: 'MODEL_STATE_CHANGE', 
+            state, 
+            model: model || process.env.LLM_MODEL || 'default'
+        });
+    }
+};
 
 
 /**
@@ -206,19 +240,17 @@ function startLlamaServer(modelName) {
  * Kill any process using a specific port with proper monitoring and timeout
  */
 async function killPort(port) {
-    return new Promise((resolve) => {
-        try {
-            const pids = execSync(`lsof -ti:${port} -sTCP:LISTEN`).toString().trim();
+    try {
+        const pids = execSync(`lsof -ti:${port} -sTCP:LISTEN`).toString().trim();
 
-            if (pids) {
-                console.log(`${C.red}💀 Killing processes on port ${port}: ${pids.split('\n').join(', ')}${C.reset}`);
-                execSync(`kill -9 ${pids.split('\n').join(' ')}`);
-            }
-        } catch (e) {
-            // No process found on port, which is fine
+        if (pids) {
+            console.log(`${C.red}💀 Killing processes on port ${port}: ${pids.split('\n').join(', ')}${C.reset}`);
+            execSync(`kill -9 ${pids.split('\n').join(' ')}`);
         }
-        setTimeout(resolve, 500); // Give the OS half a second to release the port
-    });
+    } catch (e) {
+        // No process found on port
+    }
+    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s for OS to release port
 }
 
 /**
@@ -361,24 +393,41 @@ async function main() {
                 await cleanup();
                 return;
             }
+
+            if (msg.type === 'STOP_LLAMA') {
+                console.log(`\n${C.yellow}🔄 Manager: Received manual stop request for MLX server.${C.reset}`);
+                await killServer();
+                broadcastState('offline');
+                return;
+            }
             if (msg.type === 'RESTART_LLAMA') {
-                if (isRestarting) return;
+                if (isRestarting && !msg.forceClean) return;
                 isRestarting = true;
                 try {
                     const available = await getLoadedModels();
-                    if (available.includes(msg.model)) {
+                    if (available.includes(msg.model) && !msg.forceClean) {
                         console.log(`${C.green}✅ Correct model ${msg.model} active. No action.${C.reset}`);
                         isRestarting = false;
+                        broadcastState('online', msg.model);
                         return;
                     }
                     console.log(`\n${C.yellow}🔄 Manager: Received restart request for model: ${msg.model || 'default'}${C.reset}`);
+                    console.log(`${C.dim}📡 Available: ${available.join(', ')}${C.reset}`);
                     logGepEvent('repair', 'model_restart_requested', { model: msg.model });
+                    
+                    broadcastState('spawning', msg.model);
                     await killServer();
                     startLlamaServer(msg.model);
-                    // isRestarting will be reset by the health loop or a successful start
+                    
                     const checkHealthy = async () => {
                         const h = await checkServerHealth();
                         if (h) {
+                            process.env.LLM_MODEL = msg.model; // Update supervisor state
+                            updateEnvModel(msg.model); // Update .env for persistence
+                            if (global.uiProcess && global.uiProcess.connected) {
+                                global.uiProcess.send({ type: 'MODEL_UPDATED', model: msg.model });
+                            }
+                            broadcastState('online', msg.model);
                             isRestarting = false;
                         } else {
                             setTimeout(checkHealthy, 2000);
@@ -387,6 +436,7 @@ async function main() {
                     checkHealthy();
                 } catch (e) {
                     isRestarting = false;
+                    broadcastState('offline');
                 }
             }
 
@@ -416,7 +466,8 @@ async function main() {
             // A crash is defined as:
             // 1. A non-zero exit code
             // 2. A null code + a present signal (e.g. SIGKILL, SIGSEGV)
-            const isCrash = (code !== 0 && code !== null) || (code === null && signal !== null);
+            // 3. A null code + null signal (often indicates an abrupt termination or OOM)
+            const isCrash = (code !== 0 && code !== null) || (code === null);
 
             if (isCrash) {
                 console.log(`${C.yellow}🔄 Supervisor: Node process crashed or was killed by signal ${signal}. Respawning ${name} in 3s... (Crash ${crashCount}/5)${C.reset}`);
@@ -432,17 +483,32 @@ async function main() {
     startUI();
 
     // 3. Periodic Health Watchdog
+    let lastHealthyTime = Date.now();
     setInterval(async () => {
         const healthy = await checkServerHealth();
-        if (!healthy) {
-            // Only restart if we've had activity recently, otherwise just let it stay dead to save RAM
-            if (Date.now() - lastActivityTime < IDLE_TIMEOUT) {
-                console.log(`\n${C.red}⚠️  Watchdog: Llama Server unresponsive! Restarting...${C.reset}`);
-                logGepEvent('repair', 'server_unresponsive', { model: process.env.LLM_MODEL });
+        
+        if (healthy) {
+            lastHealthyTime = Date.now();
+            if (currentMlxState !== 'online') {
+                broadcastState('online');
+            }
+        } else {
+            // Unhealthy check
+            if (currentMlxState === 'online' && !isRestarting) {
+                broadcastState('offline');
+            }
+            
+            const unresponsiveTooLong = (Date.now() - lastHealthyTime) > HEALTH_TIMEOUT;
+            const hadRecentActivity = (Date.now() - lastActivityTime) < IDLE_TIMEOUT;
+
+            if (unresponsiveTooLong && hadRecentActivity) {
+                console.log(`\n${C.red}⚠️  Watchdog: Llama Server unresponsive for >${HEALTH_TIMEOUT / 1000}s! Restarting...${C.reset}`);
+                logGepEvent('repair', 'server_unresponsive', { model: process.env.LLM_MODEL, duration_s: (Date.now() - lastHealthyTime) / 1000 });
                 await killServer();
+                lastHealthyTime = Date.now(); // Reset counter for reboot
+                broadcastState('spawning');
                 startLlamaServer();
             }
-            return;
         }
 
         // Idle Unload Logic
@@ -451,6 +517,7 @@ async function main() {
             console.log(`\n${C.magenta}💤 Idle Timeout (${Math.floor(idleTime / 60000)}m). Unloading model to release RAM...${C.reset}`);
             logGepEvent('resource', 'idle_unload', { idle_minutes: Math.floor(idleTime / 60000) });
             await killServer();
+            broadcastState('offline');
             if (global.uiProcess && global.uiProcess.connected) {
                 global.uiProcess.send({ type: 'MODEL_SLEEPING' });
             }

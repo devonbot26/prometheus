@@ -123,7 +123,7 @@ async function handleResponse(response, streamed = false) {
         try {
             if (fs.existsSync(HANDOFF_PATH)) {
                 const handoff = JSON.parse(fs.readFileSync(HANDOFF_PATH, 'utf-8'));
-                const wakeUp = `[SYSTEM] You are now the ${handoff.to}. Your task: ${handoff.context}`;
+                const wakeUp = handoff.context;
                 console.log(`\n🤖 Auto-Continue [Step ${autoStep}/${MAX_AUTO_CONTINUES}]: Waking ${handoff.to}...\n`);
 
                 agent.setMode(handoff.to);
@@ -146,7 +146,7 @@ async function handleResponse(response, streamed = false) {
                     autoStep++;
                     agent.setMode('team-manager');
                     const currentStepId = state.current_step_id;
-                    const nudge = `[SYSTEM] You are Niki (PM). A worker just completed their task for step ${currentStepId}. You MUST now call mark_step_done (step_id: ${currentStepId}, status: "completed") and then call get_next_step to continue the plan. Do NOT ask the user anything.`;
+                    const nudge = `The worker completed step ${currentStepId}. Please mark it done and proceed to the next step.`;
                     console.log(`\n🔄 [PM RESUME] Auto-nudging Niki to continue plan. Pending: ${pending.length} steps.\n`);
                     const streamCb = createStreamHandler();
                     const nextResponse = await agent.process(nudge, undefined, streamCb);
@@ -286,14 +286,15 @@ function ask() {
             if (cmd === '/model') {
                 const arg = args[1];
                 const MODEL_ID_MAP = {
-                    '1': 'mlx-community/Qwen3.5-4B-4bit',
-                    '2': 'mlx-community/Qwen3.5-9B-Instruct-4bit',
-                    '3': 'mlx-community/Llama-3.1-8B-Instruct-4bit'
+                    '1': 'mlx-community/DeepSeek-R1-Distill-Qwen-14B-4bit',
+                    '2': 'mlx-community/Qwen2.5-Coder-14B-4bit',
+                    '3': 'Jackrong/MLX-Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-4bit',
+                    '4': '/Users/nelsonwong/Documents/projects/Prometheus/models/Qwen3.5-9B-Claude-Abliterated-mxfp4'
                 };
                 const modelId = MODEL_ID_MAP[arg] || arg;
                 if (!modelId) {
                     console.log(`\n🧠 Switch model: /model [id|name]`);
-                    console.log(`   Presets: 1(Qwen4B), 2(Qwen9B), 3(Llama8B)\n`);
+                    console.log(`   Presets: 1(DeepSeek), 2(Coder), 3(Qwen9B), 4(MXFP4-9B)\n`);
                 } else {
                     if (process.send) {
                         sendActivity('RESTART_LLAMA', { model: modelId });

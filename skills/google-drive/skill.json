@@ -15,6 +15,47 @@
             "function": "drive_restore",
             "description": "Restore system data from Google Drive to local machine",
             "parameters": {}
+        },
+        "drive_list": {
+            "path": "bridge.js",
+            "function": "drive_list",
+            "description": "List files and folders in a specific Google Drive path",
+            "parameters": {
+                "path": "string (optional) - The human-readable path (e.g. '/Backup'). Defaults to root."
+            }
+        },
+        "drive_peek": {
+            "path": "bridge.js",
+            "function": "drive_peek",
+            "description": "Read metadata and the first 2000 chars of a file (safe for large files)",
+            "parameters": {
+                "path": "string (required) - The human-readable path to the file."
+            }
+        },
+        "drive_read": {
+            "path": "bridge.js",
+            "function": "drive_read",
+            "description": "Read the full content of a text or Google Doc file",
+            "parameters": {
+                "path": "string (required) - The human-readable path to the file."
+            }
+        },
+        "drive_write": {
+            "path": "bridge.js",
+            "function": "drive_write",
+            "description": "Create or update a file in Google Drive",
+            "parameters": {
+                "path": "string (required) - The path where to write the file.",
+                "content": "string (required) - The text content to write."
+            }
+        },
+        "drive_trash": {
+            "path": "bridge.js",
+            "function": "drive_trash",
+            "description": "Move a file or folder to the Google Drive trash (safety-first delete)",
+            "parameters": {
+                "path": "string (required) - The path to trash."
+            }
         }
     }
 }

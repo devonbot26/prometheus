@@ -34,12 +34,12 @@ async function isLocalAvailable() {
 /**
  * Call Local LLM with retry logic
  */
-async function callLocal(messages, options = {}) {
+async function callLocal(messages, options = {}, targetModelOverride = null) {
     const maxRetries = 3;
     let attempt = 0;
 
     while (attempt < maxRetries) {
-        const targetModel = options.deepThinking ? LOCAL_MODEL_9B : LOCAL_MODEL_4B;
+        const targetModel = targetModelOverride || (options.deepThinking ? LOCAL_MODEL_9B : LOCAL_MODEL_4B);
         console.log(`[DEBUG] Calling ${getLocalUrl()}${targetModel.toLowerCase().includes('vl') || targetModel.toLowerCase().includes('qwen3.5') ? '/chat/completions' : '/v1/chat/completions'} (Attempt ${attempt + 1}/${maxRetries})`);
         try {
             const startTime = Date.now();
@@ -122,8 +122,8 @@ async function callLocal(messages, options = {}) {
 /**
  * Call Local Model (Streaming)
  */
-async function callLocalStreaming(messages, options = {}) {
-    const targetModel = options.deepThinking ? LOCAL_MODEL_9B : LOCAL_MODEL_4B;
+async function callLocalStreaming(messages, options = {}, targetModelOverride = null) {
+    const targetModel = targetModelOverride || (options.deepThinking ? LOCAL_MODEL_9B : LOCAL_MODEL_4B);
     const modelNameLower = targetModel.toLowerCase();
     const isVL = modelNameLower.includes('vl');
     const endpoint = isVL ? '/chat/completions' : '/v1/chat/completions';
@@ -131,8 +131,14 @@ async function callLocalStreaming(messages, options = {}) {
 
     console.log(`[DEBUG] Calling ${getLocalUrl()}${endpoint} with stream: true`);
 
-    const reqStart = Date.now();
+    // TTFT Watchdog (Time To First Token) implementation with AbortController integration
+    const watchdogController = new AbortController();
+    const combinedSignals = options.signal ? 
+        AbortSignal.any([options.signal, watchdogController.signal]) : 
+        watchdogController.signal;
+
     let firstTokenTime = 0;
+    const reqStart = Date.now();
 
     const reqBody = {
         model: targetModel,
@@ -146,18 +152,27 @@ async function callLocalStreaming(messages, options = {}) {
         reqBody.adapters = options.adapterPath;
     }
 
+    let ttftTimeout = setTimeout(() => {
+        if (!firstTokenTime) {
+            console.error(`🚨 [TIMEOUT] TTFT Watchdog triggered! No tokens after 90s. Aborting server connection.`);
+            watchdogController.abort();
+        }
+    }, 90000);
+
     const res = await fetch(`${getLocalUrl()}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(reqBody),
-        signal: options.signal
+        signal: combinedSignals
     });
 
     if (!res.ok) {
+        clearTimeout(ttftTimeout);
         throw new Error(`Local LLM Streaming Error (${res.status}): ${res.statusText}`);
     }
 
     if (!res.body) {
+        clearTimeout(ttftTimeout);
         throw new Error("Local LLM Streaming Error: No response body received.");
     }
 
@@ -171,11 +186,30 @@ async function callLocalStreaming(messages, options = {}) {
     let completionTokens = 0;
 
     while (!streamDone) {
-        const { value, done } = await reader.read();
-        if (done) break;
+        // High-level watchdog: if we stick in reader.read() too long, abort
+        const readPromise = reader.read();
+        const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error("STREAM_READ_TIMEOUT")), 90000)
+        );
+
+        let value, done;
+        try {
+            const resRace = await Promise.race([readPromise, timeoutPromise]);
+            value = resRace.value;
+            done = resRace.done;
+        } catch (e) {
+            clearTimeout(ttftTimeout);
+            throw e;
+        }
+        
+        if (done) {
+            clearTimeout(ttftTimeout);
+            break;
+        }
 
         if (!firstTokenTime) {
             firstTokenTime = Date.now();
+            clearTimeout(ttftTimeout);
             logDebug(`[DEBUG] [TTFT] ${firstTokenTime - reqStart}ms`);
         }
 
@@ -226,6 +260,8 @@ async function callLocalStreaming(messages, options = {}) {
     const endTime = Date.now();
     const genDurationS = firstTokenTime && endTime > firstTokenTime ? (endTime - firstTokenTime) / 1000 : 0.1;
     const tps = completionTokens > 0 && genDurationS > 0 ? (completionTokens / genDurationS).toFixed(1) : 0;
+
+    clearTimeout(ttftTimeout);
 
     return {
         text: textOut,
@@ -325,6 +361,9 @@ let currentLocalModel = null; // Track what we think is running
 export async function chat(messages, options = {}) {
     const modelToUse = options.forceModel || modelOverride;
 
+    // Determine target local model
+    const targetLocalModel = options.modelId || (options.deepThinking ? LOCAL_MODEL_9B : LOCAL_MODEL_4B);
+
     // 0. Respect explicit overrides
     if (modelToUse === 'gemini') {
         const result = await callGemini(messages, options);
@@ -332,12 +371,9 @@ export async function chat(messages, options = {}) {
     }
 
     if (modelToUse === 'local' && await isLocalAvailable()) {
-        const result = options.onToken ? await callLocalStreaming(messages, options) : await callLocal(messages, options);
+        const result = options.onToken ? await callLocalStreaming(messages, options, targetLocalModel) : await callLocal(messages, options, targetLocalModel);
         return { ...result, model: 'local' };
     }
-
-    // Determine target local model
-    const targetLocalModel = options.deepThinking ? LOCAL_MODEL_9B : LOCAL_MODEL_4B;
 
     // 1. Check if we need to switch models
     const availableModels = await getLocalModels();
@@ -349,10 +385,9 @@ export async function chat(messages, options = {}) {
         if (process.send) {
             process.send({ type: 'RESTART_LLAMA', model: targetLocalModel });
 
-            // Wait for restart (poll health)
-            console.log('⏳ 正在等待模型切換... | Waiting for model switch...');
+            console.log('⏳ Waiting for model switch...');
             let attempts = 0;
-            while (attempts < 60) { // Up to 60s for 14B
+            while (attempts < 180) { // Up to 180s for 14B+ models
                 await new Promise(r => setTimeout(r, 1000));
                 const newModels = await getLocalModels();
                 if (newModels.includes(targetLocalModel)) {
@@ -363,6 +398,9 @@ export async function chat(messages, options = {}) {
                 }
                 attempts++;
             }
+            if (attempts >= 180) {
+                console.warn(`⚠️ Timeout waiting for model switch: ${targetLocalModel}. Proceeding anyway (may fail).`);
+            }
         }
     } else if (!localUp) {
         // If down, try to start the intended one
@@ -370,21 +408,21 @@ export async function chat(messages, options = {}) {
         if (process.send) {
             process.send({ type: 'RESTART_LLAMA', model: targetLocalModel });
             currentLocalModel = targetLocalModel;
+        }
 
-            console.log('⏳ Waiting for server startup...');
-            let attempts = 0;
-            while (attempts < 120) { // Increased to 2 minutes for 9B model
-                await new Promise(r => setTimeout(r, 1000));
-                if (await isLocalAvailable()) {
-                    await new Promise(r => setTimeout(r, 2000)); // Additional buffer for memory mapping
-                    console.log('✅ Server online with new model.');
-                    break;
-                }
-                attempts++;
+        console.log('⏳ Waiting for server startup...');
+        let attempts = 0;
+        while (attempts < 180) { // Increased to 3 minutes for slow model loads
+            await new Promise(r => setTimeout(r, 1000));
+            if (await isLocalAvailable()) {
+                await new Promise(r => setTimeout(r, 2000)); // Additional buffer for memory mapping
+                console.log('✅ Server online with new model.');
+                break;
             }
-            if (attempts >= 120) {
-                throw new Error(`Timeout waiting for Llama Server to load model: ${targetLocalModel}`);
-            }
+            attempts++;
+        }
+        if (attempts >= 180) {
+            throw new Error(`Timeout waiting for Llama Server to load model: ${targetLocalModel}`);
         }
     } else {
         // Already running the correct model
@@ -412,7 +450,7 @@ export async function chat(messages, options = {}) {
 
     // 4. Fallback logic: Try Local first, then Cloud
     if (await isLocalAvailable()) {
-        const result = options.onToken ? await callLocalStreaming(messages, options) : await callLocal(messages, options);
+        const result = options.onToken ? await callLocalStreaming(messages, options, targetLocalModel) : await callLocal(messages, options, targetLocalModel);
         const modelStr2 = process.env.LLM_MODEL || 'local';
         const modelBase2 = modelStr2.split('/').pop();
         const sizeMatch2 = modelBase2.match(/(\d+[Bb])/);

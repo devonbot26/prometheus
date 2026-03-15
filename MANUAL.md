@@ -66,6 +66,34 @@ Prometheus includes a web dashboard to manage external Model Context Protocol (M
 
 ---
 
+## 🖥️ Native Dashboard (macOS)
+
+The Native Dashboard is a high-performance macOS client that provides real-time monitoring and control. It depends on the Prometheus backend for all data and LLM orchestration.
+
+### 1. Step-by-Step Startup
+To ensure the system initializes correctly (including the LLM server), follow this exact order:
+
+1.  **Start the Backend Supervisor**:
+    Open a terminal in the `Prometheus` directory and run:
+    ```bash
+    npm start
+    ```
+    *Wait for the log to show `✅ Llama Server is online`.*
+
+2.  **Launch the Native Dashboard**:
+    Open another terminal in the `PrometheusDashboard` directory and run:
+    ```bash
+    swift run
+    ```
+
+### 2. Troubleshooting LLM Startup
+If you find that the Native Dashboard fails to "kick start" the LLM server:
+- **Dependency**: The Dashboard is a client. It cannot start the MLX server directly if the backend Node process (`prom.js`) is not already running.
+- **Protocol**: Always ensure step 1 (starting the backend) is fully complete before launching the dashboard.
+- **Manual Overrides**: If the backend is running but the model isn't loading, you can use the **Start Model** button in the Dashboard UI or use the manual command in Section 🚀.
+
+---
+
 ## 🏥 Auto-Healing & System Diagnostics
 
 Prometheus features an autonomous self-healing loop that intercepts tool execution errors and attempts to write and apply fixes dynamically.

@@ -7,7 +7,7 @@
     <title>Prometheus Dashboard</title>
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
     <script>
         mermaid.initialize({
             startOnLoad: false,
@@ -324,84 +324,6 @@
             font-weight: bold;
         }
 
-        #mcp-hub-panel,
-        #social-panel,
-        #tv-panel {
-            flex: 1;
-            display: none;
-            padding: 20px;
-            overflow-y: auto;
-            border-right: 1px solid #30363d;
-        }
-
-        .channel-item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 10px;
-            background: rgba(48, 54, 61, 0.4);
-            border: 1px solid #30363d;
-            border-radius: 6px;
-            cursor: pointer;
-            transition: all 0.2s;
-            margin-bottom: 8px;
-        }
-
-        .channel-item:hover {
-            background: rgba(56, 139, 253, 0.1);
-            border-color: var(--blue);
-        }
-
-        .channel-item.active {
-            background: rgba(56, 139, 253, 0.2);
-            border-color: var(--blue);
-        }
-
-        .channel-logo {
-            width: 30px;
-            height: 20px;
-            object-fit: contain;
-            background: #fff;
-            padding: 2px;
-            border-radius: 2px;
-        }
-
-        .channel-name {
-            font-size: 0.8rem;
-            color: #c9d1d9;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .category-header {
-            font-size: 0.7rem;
-            font-weight: bold;
-            color: var(--blue);
-            margin: 15px 0 8px 5px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            border-bottom: 1px solid rgba(88, 166, 255, 0.2);
-            padding-bottom: 3px;
-        }
-
-        #tv-search {
-            width: 100%;
-            background: #0d1117;
-            border: 1px solid #30363d;
-            border-radius: 4px;
-            padding: 8px 12px;
-            color: #c9d1d9;
-            font-size: 0.8rem;
-            margin-bottom: 15px;
-            outline: none;
-        }
-
-        #tv-search:focus {
-            border-color: var(--blue);
-            box-shadow: 0 0 0 1px var(--blue);
-        }
-
         .social-entry {
             background: #161b22;
             border: 1px solid #30363d;
@@ -517,17 +439,11 @@
             <div>🔥 PROMETHeUS v2.0</div>
             <div style="margin-left: 20px; display: flex; gap: 5px;">
                 <button class="tab-btn active" onclick="switchTab('chat')">Chat Hub</button>
-                <button class="tab-btn" onclick="switchTab('tv')">📺 Live TV</button>
                 <button class="tab-btn" onclick="switchTab('mcp')">MCP Hub</button>
+                <button class="tab-btn" onclick="switchTab('context')">🧠 Context Hub</button>
             </div>
         </div>
         <div id="quota-monitor" style="display: flex; align-items: center; gap: 15px; font-size: 0.75rem;">
-            <div style="display: flex; align-items: center; gap: 5px;">
-                <span style="color: #8b949e; font-weight: bold;">STATUS:</span>
-                <div id="status"
-                    style="color: var(--green); font-weight: bold; max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    Idle</div>
-            </div>
             <div id="active-model"
                 style="color: var(--blue); font-weight: bold; background: rgba(56, 139, 253, 0.1); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--blue);">
                 --</div>
@@ -537,65 +453,27 @@
                 <span style="color: #8b949e; font-weight: bold; font-size: 0.7rem;">MEM:</span>
                 <span id="mem-status" style="font-weight: bold; font-size: 0.75rem; color: var(--green);">Healthy</span>
             </div>
-            <div
-                style="width: 150px; height: 10px; background: #30363d; border-radius: 5px; overflow: hidden; border: 1px solid #444;">
-                <div id="fuel-gauge"
-                    style="width: 100%; height: 100%; background: var(--green); transition: width 0.5s ease, background 0.5s;">
-                </div>
-            </div>
-            <div id="quota-percent">100% Remaining</div>
         </div>
     </div>
     <div id="main">
         <div id="chat-panel">
             <div id="messages"></div>
-            <div id="input-area">
+            <div id="input-area" style="position: relative;">
+                <div style="position: absolute; top: -35px; left: 10px; display: flex; align-items: center; gap: 8px;">
+                    <label class="switch" style="transform: scale(0.7); margin-bottom: 0;">
+                        <input type="checkbox" id="draftModeToggle">
+                        <span class="slider"></span>
+                    </label>
+                    <span style="color: var(--yellow); font-size: 0.8rem; font-weight: bold; cursor: help;" title="When enabled, Prometheus will ask clarifying questions and output a highly refined prompt instead of executing actions.">🪄 Draft Mode</span>
+                </div>
                 <input type="text" id="msgInput" placeholder="Type a command..." autocomplete="off">
                 <button id="sendBtn" onclick="send()">Send</button>
             </div>
         </div>
 
-        <div id="mcp-hub-panel">
-            <h2>MCP Servers</h2>
-            <p style="color: #8b949e; margin-top: -10px; margin-bottom: 20px;">Manage active connections to external
-                Model Context Protocol servers.</p>
-            <div id="mcp-list">Loading servers...</div>
-        </div>
+        <div id="mcp-hub-panel" style="display: none; padding: 20px; flex: 1; overflow-y: auto; border-right: 1px solid #30363d;">
 
-        <div id="tv-panel" style="display: none; height: 100%; flex-direction: column; padding: 20px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                <h2 style="margin:0">Live TV Feed 📺</h2>
-                <div id="tv-status" style="color: #8b949e; font-size: 0.8rem;">Ready</div>
-            </div>
-            <div style="display: flex; gap: 20px; height: calc(100% - 40px);">
-                <div id="tv-main"
-                    style="flex: 3; background: #000; border-radius: 8px; overflow: hidden; position: relative; border: 1px solid #30363d;">
-                    <video id="video-player" controls style="width: 100%; height: 100%; object-fit: contain;"></video>
-                    <div id="video-overlay"
-                        style="position: absolute; top: 10px; left: 10px; padding: 5px 10px; background: rgba(0,0,0,0.7); border-radius: 4px; pointer-events: none; opacity: 0; transition: opacity 0.3s;">
-                        <span id="video-title" style="font-weight: bold; font-size: 0.9rem;"></span>
-                    </div>
-                </div>
-                <div id="tv-sidebar"
-                    style="flex: 1; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding-right: 5px;">
-                    <input type="text" id="tv-search" placeholder="Search channels..." onkeyup="filterChannels()">
-                    <div id="tv-channels" class="channel-list">
-                        <div style="color: #8b949e; font-style: italic;">Loading Channels...</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div id="social-panel">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2>Social Activity 🐦</h2>
-                <div id="twitter-status" class="mcp-status mcp-offline">Checking X API...</div>
-            </div>
-            <div id="social-list">
-                <div style="color: #8b949e; font-style: italic;">No social activity logged yet. Prometheus will post
-                    updates here.</div>
-            </div>
-        </div>
+        <div id="social-panel" style="display: none; padding: 20px; flex: 1; overflow-y: auto; border-right: 1px solid #30363d;">
 
 
         <div id="side-panel">
@@ -608,6 +486,51 @@
                 <div class="log-entry">System initialized.</div>
             </div>
         </div>
+
+        <div id="context-hub-panel" style="display: none; height: 100%; flex-direction: column; padding: 20px; overflow: hidden;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <div>
+                    <h2 style="margin:0; margin-bottom: 5px;">🧠 Brain Editor (Context Hub)</h2>
+                    <div style="color: #8b949e; font-size: 0.85rem;">Review and trim the active short-term memory sent to the LLM.</div>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="requestContext()" style="background: var(--term-bg); color: var(--text); border: 1px solid #30363d; padding: 6px 12px; border-radius: 4px; cursor: pointer;">🔄 Refresh</button>
+                    <button onclick="saveContext()" style="background: var(--green); color: white; border: none; padding: 6px 15px; border-radius: 4px; font-weight: bold; cursor: pointer;">💾 Save Brain State</button>
+                </div>
+            </div>
+            
+            <div style="display: flex; gap: 20px; flex: 1; min-height: 0;">
+                <!-- System & Static Context -->
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding-right: 10px;">
+                    <h3 style="margin: 0; color: var(--blue); font-size: 1rem;">Core Directives</h3>
+                    <div style="background: var(--term-bg); border: 1px solid #30363d; border-radius: 6px; padding: 10px;">
+                        <div style="font-weight: bold; margin-bottom: 5px; color: var(--yellow);">Active Mode: <span id="ctx-mode" style="color: var(--text);">--</span></div>
+                        <pre id="ctx-system" style="white-space: pre-wrap; font-size: 0.75rem; color: #8b949e; margin: 0; overflow-y: auto; max-height: 200px;">Loading system prompt...</pre>
+                    </div>
+
+                    <h3 style="margin: 10px 0 0 0; color: var(--blue); font-size: 1rem;">Project Plan (PM_STATE.json)</h3>
+                    <div id="ctx-plan" style="background: var(--term-bg); border: 1px solid #30363d; border-radius: 6px; padding: 10px; font-size: 0.75rem; color: #8b949e; line-height: 1.4;">
+                        No active plan state loaded.
+                    </div>
+                </div>
+                
+                <!-- History Trimmer -->
+                <div style="flex: 2; display: flex; flex-direction: column; gap: 10px; background: #000; border: 1px solid #30363d; border-radius: 6px; padding: 15px; overflow-y: auto;">
+                    <h3 style="margin: 0; color: var(--blue); font-size: 1rem; border-bottom: 1px dashed #30363d; padding-bottom: 10px;">Interactive History (history.json)</h3>
+                    <div id="ctx-history-list" style="display: flex; flex-direction: column; gap: 10px;">
+                        <div style="color: #8b949e; font-style: italic;">Loading memory...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <div id="footer-status" style="padding: 10px 20px; background: var(--term-bg); border-top: 1px solid #30363d; display: flex; align-items: center; gap: 10px; font-size: 0.85rem;">
+        <span style="color: #8b949e; font-weight: bold;">STATUS:</span>
+        <div id="status"
+            style="color: var(--green); font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;">
+            Idle</div>
     </div>
 
     <script>
@@ -879,6 +802,11 @@
             }
         });
 
+        socket.on('model_info', (model) => {
+            document.getElementById('active-model').textContent = model;
+            log(`🧠 Active Model: ${model}`);
+        });
+
         socket.on('history', (history) => {
             messagesDiv.innerHTML = '';
             history.forEach(h => addMessage(h.role, h.content));
@@ -964,8 +892,23 @@
                 const parts = text.split('```');
                 let html = '';
                 parts.forEach((part, i) => {
-                    if (i % 2 === 1) html += `<pre style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 4px; overflow-x: auto;"><code>${part}</code></pre>`;
-                    else html += formatText(part);
+                    if (i % 2 === 1) {
+                        if (part.startsWith('prompt-draft\n')) {
+                            const draftContent = part.replace(/^prompt-draft\n/, '');
+                            const safeContent = draftContent.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;');
+                            html += `<div style="background: rgba(227, 179, 65, 0.1); border: 1px solid var(--yellow); border-radius: 8px; padding: 15px; margin: 15px 0;">
+                            <div style="color: var(--yellow); font-weight: bold; margin-bottom: 10px; border-bottom: 1px dashed var(--yellow); padding-bottom: 5px;">📝 Drafted Prompt</div>
+                            <pre style="white-space: pre-wrap; font-family: monospace; color: #fff; margin-bottom: 15px;">${draftContent}</pre>
+                            <button onclick="executeDraft('${safeContent}')" style="background: var(--green); color: white; border: none; padding: 8px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 8px; margin-left: auto;">
+                                🚀 Execute This Plan
+                            </button>
+                        </div>`;
+                        } else {
+                            html += `<pre style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 4px; overflow-x: auto;"><code>${part}</code></pre>`;
+                        }
+                    } else {
+                        html += formatText(part);
+                    }
                 });
                 div.innerHTML = html;
             } else {
@@ -1026,13 +969,15 @@
             const percentText = document.getElementById('quota-percent');
             const timer = document.getElementById('refresh-timer');
 
-            gauge.style.width = `${stats.percent}%`;
-            percentText.textContent = `${stats.percent}% Remaining`;
-
-            // Alert colors
-            if (stats.percent < 20) gauge.style.background = 'var(--red)';
-            else if (stats.percent < 50) gauge.style.background = 'var(--yellow)';
-            else gauge.style.background = 'var(--green)';
+            if (gauge) {
+                gauge.style.width = `${stats.percent}%`;
+                if (stats.percent < 20) gauge.style.background = 'var(--red)';
+                else if (stats.percent < 50) gauge.style.background = 'var(--yellow)';
+                else gauge.style.background = 'var(--green)';
+            }
+            if (percentText) {
+                percentText.textContent = `${stats.percent}% Remaining`;
+            }
 
             // Countdown
             clearInterval(window.quotaInterval);
@@ -1043,25 +988,18 @@
                 const h = Math.floor(timeRemaining / 3600);
                 const m = Math.floor((timeRemaining % 3600) / 60);
                 const s = timeRemaining % 60;
-                timer.textContent = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+                if (timer) timer.textContent = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
                 timeRemaining--;
             };
             tick();
             window.quotaInterval = setInterval(tick, 1000);
         }
 
-        // --- MCP Hub Logic ---
         function switchTab(tab) {
-            // Cleanup TV if moving AWAY from it
-            const currentTab = document.querySelector('.tab-btn.active');
-            if (currentTab && currentTab.innerText.includes('Live TV') && tab !== 'tv') {
-                stopTV();
-            }
-
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             document.getElementById('chat-panel').style.display = tab === 'chat' ? 'flex' : 'none';
             document.getElementById('mcp-hub-panel').style.display = tab === 'mcp' ? 'block' : 'none';
-            document.getElementById('tv-panel').style.display = tab === 'tv' ? 'flex' : 'none';
+            document.getElementById('context-hub-panel').style.display = tab === 'context' ? 'flex' : 'none';
             if (document.getElementById('side-panel')) {
                 document.getElementById('side-panel').style.display = tab === 'chat' ? 'flex' : 'none';
             }
@@ -1071,108 +1009,12 @@
             } else if (tab === 'mcp') {
                 document.querySelector('.tab-btn[onclick="switchTab(\'mcp\')"]').classList.add('active');
                 loadMcpServers();
-            } else if (tab === 'tv') {
-                document.querySelector('.tab-btn[onclick="switchTab(\'tv\')"]').classList.add('active');
-                loadTVChannels();
+            } else if (tab === 'context') {
+                document.querySelector('.tab-btn[onclick="switchTab(\'context\')"]').classList.add('active');
+                requestContext();
             }
         }
 
-        let hls = null;
-        function loadTVChannels() {
-            const container = document.getElementById('tv-channels');
-            if (container.children.length > 2 && !container.innerHTML.includes('Loading')) return;
-
-            fetch('/api/tv/channels')
-                .then(r => r.json())
-                .then(groups => {
-                    container.innerHTML = '';
-                    groups.forEach(group => {
-                        const header = document.createElement('div');
-                        header.className = 'category-header';
-                        header.innerText = group.category;
-                        container.appendChild(header);
-
-                        group.channels.forEach(ch => {
-                            const div = document.createElement('div');
-                            div.className = 'channel-item';
-                            div.innerHTML = `
-                                <img src="${ch.logo || ''}" class="channel-logo" onerror="this.src='https://i.imgur.com/koFYddE.png'">
-                                <span class="channel-name">${ch.name}</span>
-                            `;
-                            div.onclick = (e) => playChannel(ch, e.currentTarget);
-                            container.appendChild(div);
-                        });
-                    });
-                })
-                .catch(err => {
-                    container.innerHTML = `<div style="color: var(--red)">Error: ${err.message}</div>`;
-                });
-        }
-
-        function filterChannels() {
-            const q = document.getElementById('tv-search').value.toLowerCase();
-            const items = document.querySelectorAll('.channel-item');
-            items.forEach(el => {
-                const name = el.querySelector('.channel-name').innerText.toLowerCase();
-                el.style.display = name.includes(q) ? 'flex' : 'none';
-            });
-
-            // Also hide headers if they have no visible items after them
-            const headers = document.querySelectorAll('.category-header');
-            headers.forEach(h => {
-                let sibling = h.nextElementSibling;
-                let hasVisible = false;
-                while (sibling && sibling.classList.contains('channel-item')) {
-                    if (sibling.style.display !== 'none') {
-                        hasVisible = true;
-                        break;
-                    }
-                    sibling = sibling.nextElementSibling;
-                }
-                h.style.display = hasVisible || q === '' ? 'block' : 'none';
-            });
-        }
-
-        function stopTV() {
-            const video = document.getElementById('video-player');
-            if (video) {
-                video.pause();
-                video.src = '';
-                video.load();
-            }
-            if (hls) {
-                hls.stopLoad();
-                hls.destroy();
-                hls = null;
-            }
-            document.getElementById('tv-status').innerText = 'Paused (Tab Backgrounded)';
-        }
-
-        function playChannel(ch, element) {
-            const video = document.getElementById('video-player');
-            const title = document.getElementById('video-title');
-            const overlay = document.getElementById('video-overlay');
-
-            document.querySelectorAll('.channel-item').forEach(el => el.classList.remove('active'));
-            element.classList.add('active');
-
-            title.innerText = ch.name;
-            overlay.style.opacity = '1';
-
-            if (Hls.isSupported()) {
-                if (hls) hls.destroy();
-                hls = new Hls();
-                hls.loadSource(ch.url);
-                hls.attachMedia(video);
-                hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
-            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                video.src = ch.url;
-                video.addEventListener('loadedmetadata', () => video.play());
-            }
-
-            document.getElementById('tv-status').innerText = `Streaming: ${ch.name}`;
-            setTimeout(() => { overlay.style.opacity = '0'; }, 5000);
-        }
 
         async function loadMcpServers() {
             try {
@@ -1233,6 +1075,126 @@
             } catch (e) {
                 log(`[MCP] Error toggling ${name}: ${e.message}`);
                 loadMcpServers();
+            }
+        }
+
+        // --- CONTEXT HUB LOGIC ---
+        let currentEditableHistory = [];
+
+        function requestContext() {
+            socket.emit('request_context');
+        }
+
+        socket.on('context_data', (data) => {
+            document.getElementById('ctx-mode').innerText = data.mode || 'Unknown';
+            document.getElementById('ctx-system').innerText = data.systemPrompt || 'No system prompt defined.';
+            
+            // Update Plan State in Hub
+            const planDiv = document.getElementById('ctx-plan');
+            if (data.pmState && data.pmState.steps) {
+                let planHtml = `<div style="margin-bottom: 10px; border-bottom: 1px dashed #30363d; padding-bottom: 5px;">`;
+                planHtml += `<strong>Project:</strong> <span style="color: var(--text)">${data.pmState.project_name || 'Active Task'}</span><br>`;
+                const isAllDone = data.pmState.steps.every(s => s.status === 'completed');
+                planHtml += `<strong>Overall Status:</strong> <span style="color: ${isAllDone ? 'var(--green)' : 'var(--yellow)'}">${isAllDone ? '✅ COMPLETED' : '🕒 IN PROGRESS'}</span><br>`;
+                planHtml += `</div>`;
+                
+                data.pmState.steps.forEach(s => {
+                    const color = s.status === 'completed' ? 'var(--green)' : 'var(--blue)';
+                    const icon = s.status === 'completed' ? '✅' : '🕒';
+                    planHtml += `<div style="margin-bottom: 8px; padding: 5px; border-radius: 4px; background: rgba(0,0,0,0.2);">
+                        <div style="font-weight: bold; color: ${color}">${icon} Step ${s.id}: ${s.status.toUpperCase()}</div>
+                        <div style="color: var(--text); font-size: 0.7rem; margin-top: 2px;">${s.description}</div>
+                    </div>`;
+                });
+                planDiv.innerHTML = planHtml;
+            } else {
+                planDiv.innerHTML = '<div style="color: #444; font-style: italic;">No active plan state found in PM_STATE.json.</div>';
+            }
+
+            currentEditableHistory = data.history || [];
+            renderContextHistory();
+        });
+
+        function renderContextHistory() {
+            const list = document.getElementById('ctx-history-list');
+            list.innerHTML = '';
+
+            if (currentEditableHistory.length === 0) {
+                list.innerHTML = '<div style="color: #8b949e; font-style: italic;">Memory empty or not loaded.</div>';
+                return;
+            }
+
+            currentEditableHistory.forEach((turn, index) => {
+                const item = document.createElement('div');
+                item.style.padding = '10px';
+                item.style.border = '1px solid #30363d';
+                item.style.borderRadius = '4px';
+                item.style.background = 'var(--term-bg)';
+                item.style.display = 'flex';
+                item.style.flexDirection = 'column';
+                item.style.gap = '5px';
+
+                const header = document.createElement('div');
+                header.style.display = 'flex';
+                header.style.justifyContent = 'space-between';
+                header.style.alignItems = 'center';
+                
+                const roleBadge = document.createElement('span');
+                roleBadge.style.fontWeight = 'bold';
+                roleBadge.style.fontSize = '0.75rem';
+                roleBadge.style.color = turn.role === 'user' ? 'var(--green)' : (turn.role === 'assistant' ? 'var(--blue)' : 'var(--yellow)');
+                roleBadge.style.textTransform = 'uppercase';
+                roleBadge.innerText = turn.role + ` [Turn ${index+1}]`;
+                
+                const delBtn = document.createElement('button');
+                delBtn.innerText = '🗑️ Remove';
+                delBtn.style.background = 'transparent';
+                delBtn.style.border = '1px solid var(--red)';
+                delBtn.style.color = 'var(--red)';
+                delBtn.style.borderRadius = '3px';
+                delBtn.style.padding = '2px 8px';
+                delBtn.style.fontSize = '0.7rem';
+                delBtn.style.cursor = 'pointer';
+                delBtn.onclick = () => {
+                    currentEditableHistory.splice(index, 1);
+                    renderContextHistory();
+                };
+
+                header.appendChild(roleBadge);
+                header.appendChild(delBtn);
+
+                const contentPre = document.createElement('pre');
+                contentPre.style.margin = '0';
+                contentPre.style.padding = '5px';
+                contentPre.style.background = 'rgba(0,0,0,0.3)';
+                contentPre.style.color = 'var(--text)';
+                contentPre.style.fontSize = '0.8rem';
+                contentPre.style.whiteSpace = 'pre-wrap';
+                contentPre.style.maxHeight = '150px';
+                contentPre.style.overflowY = 'auto';
+                
+                // Truncate massively long tool outputs visually to save DOM but keep them in the JSON
+                let displayText = turn.content || '';
+                if (displayText.length > 2000) {
+                    displayText = displayText.substring(0, 2000) + '... [TRUNCATED FOR DISPLAY. ' + (displayText.length - 2000) + ' more chars in actual payload]';
+                }
+                contentPre.innerText = displayText;
+
+                item.appendChild(header);
+                item.appendChild(contentPre);
+                list.appendChild(item);
+            });
+
+            // Auto-scroll to the bottom so newest turns are visible
+            const historyContainer = list.parentElement;
+            historyContainer.scrollTo({ top: historyContainer.scrollHeight, behavior: 'auto' });
+        }
+
+        function saveContext() {
+            if (confirm("Are you sure you want to completely overwrite the agent's short-term memory with this trimmed list?")) {
+                socket.emit('update_history', currentEditableHistory);
+                // Optionally request a fresh pull to verify
+                setTimeout(requestContext, 500); 
             }
         }
     </script>

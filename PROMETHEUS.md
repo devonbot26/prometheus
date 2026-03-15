@@ -2,6 +2,12 @@
 
 This file tracks the autonomous progress and milestones of the Prometheus AI Assistant. See also: [[README]] | [[MANUAL]] | [[ROLES]]
 
+### 2026-03-14 16:25:00 PM
+- **Native UI Evolution**: Stabilized the standalone macOS PrometheusDashboard.
+    - **Focus Resolution**: Solved the "terminal steals keyboard" bug by enforcing `.regular` activation policy and explicit `NSWindow` key/main states.
+    - **Protocol Maturity**: Fixed Socket.io native handshake (Engine.io EIO=4) and added support for `agent_output` and `agent_response` events.
+    - **Aesthetic**: Standardized high-density 11pt font across all views and restored fluid window resizability.
+
 ### 2026-03-05 12:40:00 PM
 - **Streaming & UX Evolution**: Matches OpenCode aesthetic and performance.
     - **Performance**: Implemented real-time NDJSON streaming for local MLX models. Achieved ~14.8 tok/s and near-zero TTFT.
@@ -47,10 +53,28 @@ This file tracks the autonomous progress and milestones of the Prometheus AI Ass
 - **Cleanup**: Port-based killing (`lsof`) is required because swapped-out processes sometimes ignore SIGTERM.
 - **Memory Pressure & LLM Reliability**: 16GB RAM constraints (high compression/swap) caused output truncation (invalid JSON) in 3B models.
   - *Fix*: Streamlined system prompt and implemented aggressive history pruning (truncating tool results >2000 chars).
+- **State Paradoxes**: Stale `HANDOFF.json` entries from previous turns can conflict with new project plans in `PM_STATE.json`.
+  - *Fix*: Integrated state synchronization manually and added "Project Plan" visibility to the Context Hub UI.
+- **Silent Idle (Core Bug)**: A "Hardened" loop in `core/agent.js` forced the agent into an autonomous history-wipe state after every tool call.
+  - *Fix*: Removed forced autonomy to restore conversational continuity and history persistence.
+- **Optimization Cold Starts**: High-performance local models (MXFP4) can have a 90s+ cold start on the first run, triggering watchdog timeouts.
+  - *Fix*: Increased watchdog limits and health checks to 90s to accommodate Apple Silicon native JIT compilation for new formats.
+- **The VRAM Paradox (Web UI vs. LLM)**: Running a browser UI (800MB+) alongside a local LLM creates a memory bottleneck that slashes token generation speed.
+  - *Fix*: Transitioned core UI to **Native SwiftUI + Unix Domain Sockets** to reclaim ~90% of UI RAM overhead and ensure zero network-port exposure.
+- **Keyboard Focus & CLI Activation**: On macOS, apps launched via `swift run` are often treated as background processes, causing keystrokes to stay in the terminal.
+  - *Fix*: Explicitly set `NSApp.setActivationPolicy(.regular)` and use `makeKeyAndOrderFront` to force focus capture.
+- **Socket.io Native Handshake**: Native implementations must explicitly send the `40` (Connect) packet immediately after the `5` (Upgrade) packet to enable custom event routing.
+- **Swift 6 Actor Isolation in Bridges**: Large-scale asynchronous bridges with recursive polling (like WebSocket receive loops) trigger actor isolation warnings.
+  - *Fix*: Wrap recursive calls in `Task { @MainActor in ... }` to preserve thread safety without blocking the ingestion loop.
+
+### Architectural Decision Tree
+- **Native (SwiftUI/Unix IPC)**: Default for primary workstation usage (Apple Silicon). Maximizes RAM for models.
+- **Headless (API)**: Default for server-side or secondary mac deployments.
+- **Web (Dashboard)**: Deprecated for core local control; reserved for authenticated remote multi-device monitoring.
 - **Future Improvements**:
-  - Implement a proactive memory watchdog that suggests RAM cleanup.
-  - Move to process group management (`process.kill(-pid)`) for all background tasks.
-  - Implement a "Low Memory Mode" for the agent to bypass complex history when RAM is <200MB free.
+  - Implement a proactive state scrubber that clears stale handoff/timer files when a new plan is saved.
+  - Implement a "Sanity Checker" that verifies tool-call outputs against the current reasoning (<think>) block.
+  - Enhance the manual recovery scripts to handle "Logic Paradox" detection automatically.
 
 ### 2026-03-01 1:08:45 AM
 - **Summary**: Executed a research plan for the top 10 new/trending projects on GitHub, initialized a note, gathered data from web search, and appended summaries for each project.
