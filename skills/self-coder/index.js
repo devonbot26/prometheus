@@ -10,6 +10,7 @@ import { execSync } from 'child_process';
 import { prompt, setModelOverride } from '../../core/llm.js';
 import { logDebug, logDebugError } from '../../core/logger.js';
 import { logAction } from '../../core/action-logger.js';
+import { safeExecute } from '../../core/safe-executor.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SKILLS_ROOT = path.resolve(__dirname, '../../skills');
@@ -39,7 +40,7 @@ function autoCommit(filePath, message) {
 export async function checkpoint(args) {
     const filePath = args.file_path || "";
     const label = args.label || "pre-patch";
-    const fullPath = path.resolve(process.cwd(), filePath.replace(/^~/, process.env.HOME));
+    const fullPath = path.resolve((process.env.PROJECT_ROOT || process.cwd()), filePath.replace(/^~/, process.env.HOME));
 
     if (!fs.existsSync(fullPath)) return { error: "File not found." };
 
@@ -69,7 +70,7 @@ export async function checkpoint(args) {
 export async function rollback_patch(args) {
     const filePath = args.file_path || "";
     const tag = args.tag || null;
-    const fullPath = path.resolve(process.cwd(), filePath.replace(/^~/, process.env.HOME));
+    const fullPath = path.resolve((process.env.PROJECT_ROOT || process.cwd()), filePath.replace(/^~/, process.env.HOME));
 
     try {
         const projRoot = path.resolve(__dirname, '../..');
@@ -92,7 +93,7 @@ export async function rollback_patch(args) {
  */
 export async function verify_syntax(args) {
     const filePath = args.file_path || "";
-    const fullPath = path.resolve(process.cwd(), filePath.replace(/^~/, process.env.HOME));
+    const fullPath = path.resolve((process.env.PROJECT_ROOT || process.cwd()), filePath.replace(/^~/, process.env.HOME));
 
     if (!fs.existsSync(fullPath)) return { error: "File not found." };
     if (!fullPath.endsWith('.js') && !fullPath.endsWith('.mjs') && !fullPath.endsWith('.cjs')) {
@@ -114,16 +115,11 @@ export async function run_quick_test(args) {
     const testCode = args.test_code || "";
     if (!testCode) return { error: "No test code provided." };
 
-    const tempFile = path.join('/tmp', `prom_selftest_${Date.now()}.js`);
-
     try {
-        fs.writeFileSync(tempFile, testCode);
-        const output = execSync(`node "${tempFile}"`, { encoding: 'utf-8', timeout: 10000, stdio: 'pipe' });
-        return { success: true, output };
+        const result = safeExecute(testCode);
+        return result;
     } catch (e) {
         return { success: false, error: e.stderr || e.stdout || e.message };
-    } finally {
-        if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
     }
 }
 
@@ -381,7 +377,7 @@ export async function read_file(args) {
         };
     }
 
-    const fullPath = path.resolve(process.cwd(), filePath);
+    const fullPath = path.resolve((process.env.PROJECT_ROOT || process.cwd()), filePath);
 
     try {
         logDebug("[DEBUG] Node 2: Checking file existence");
@@ -429,7 +425,7 @@ export async function apply_patch(args) {
         };
     }
 
-    const fullPath = path.resolve(process.cwd(), filePath);
+    const fullPath = path.resolve((process.env.PROJECT_ROOT || process.cwd()), filePath);
 
     try {
         logDebug("[DEBUG] Node 2: Checking path existence");
@@ -513,7 +509,7 @@ export async function apply_patch(args) {
 export async function search_files(args) {
     let { pattern, search_root } = args;
     const defaultRoot = path.join(process.env.HOME, 'Documents');
-    const root = search_root ? path.resolve(process.cwd(), search_root) : defaultRoot;
+    const root = search_root ? path.resolve((process.env.PROJECT_ROOT || process.cwd()), search_root) : defaultRoot;
 
     logDebug(`[DEBUG] Node 1: Discovery Input: ${pattern} in ${root}`);
 
@@ -523,31 +519,33 @@ export async function search_files(args) {
         logDebug(`[DEBUG] Node 1.1: Auto-expanded to "${pattern}"`);
     }
 
-    const excludeFlags = [
-        '-type d \\( -name .git -o -name node_modules -o -name _staging -o -name dist -o -name build -o -name .obsidian \\) -prune',
-        '-o -type f'
-    ].join(' ');
+    const excludeDirs = ['.git', 'node_modules', '_staging', 'dist', 'build', '.obsidian'];
+
+    function walkSync(dir) {
+        let results = [];
+        const list = fs.readdirSync(dir, { withFileTypes: true });
+        for (const file of list) {
+            const res = path.resolve(dir, file.name);
+            if (file.isDirectory()) {
+                if (!excludeDirs.includes(file.name)) {
+                    results = results.concat(walkSync(res));
+                }
+            } else {
+                results.push(res);
+            }
+        }
+        return results;
+    }
 
     try {
-        // Node 2: Fast Targeted Search
-        logDebug(`[DEBUG] Node 2: Fast Search starting...`);
-        const cmd = `find "${root}" ${excludeFlags} -name "${pattern}" -maxdepth 5 -print | head -n 30`;
-        let results = execSync(cmd, { encoding: 'utf-8', stdio: 'pipe' })
-            .split('\n')
-            .filter(p => p.trim());
+        logDebug(`[DEBUG] Node 2: Node.js recursive search starting...`);
+        const allFiles = walkSync(root);
+        
+        // Match using the pattern (case-insensitive fuzzy)
+        const regex = new RegExp(pattern.replace(/\*/g, '.*'), 'i');
+        let results = allFiles.filter(f => regex.test(path.basename(f))).slice(0, 30);
 
-        // Node 4: Fuzzy Fallback
         if (results.length === 0) {
-            logDebug(`[DEBUG] Node 4: No exact matches. Trying case-insensitive fuzzy search...`);
-            const fuzzyCmd = `find "${root}" ${excludeFlags} -iname "${pattern}" -maxdepth 5 -print | head -n 30`;
-            results = execSync(fuzzyCmd, { encoding: 'utf-8', stdio: 'pipe' })
-                .split('\n')
-                .filter(p => p.trim());
-        }
-
-        // Node 3: Result Analysis
-        if (results.length === 0) {
-            // Node 7: Diagnostic Failure
             logDebug(`[DEBUG] Node 7: Terminal failure for "${pattern}"`);
             return {
                 error: `No files matching "${pattern}" found in ${root}.`,
@@ -556,14 +554,14 @@ export async function search_files(args) {
         }
 
         if (results.length === 1) {
-            // Node 5: Direct Success
             const filePath = results[0];
             const relativeToHome = path.relative(process.env.HOME, filePath);
             logDebug(`[DEBUG] Node 5: Exact match: ${filePath}`);
 
             let snippet = "";
             try {
-                snippet = execSync(`head -n 5 "${filePath}"`, { encoding: 'utf-8' });
+                const content = fs.readFileSync(filePath, 'utf-8');
+                snippet = content.split('\n').slice(0, 5).join('\n');
             } catch (e) {
                 snippet = "[Error reading snippet]";
             }
@@ -576,7 +574,6 @@ export async function search_files(args) {
             };
         }
 
-        // Node 6: Ambiguity & Summarization
         if (results.length > 10) {
             const folderCounts = {};
             results.forEach(p => {
@@ -608,7 +605,7 @@ export async function search_files(args) {
         logDebugError(`[DEBUG] Terminal: Search Error: ${e.message}`);
         return {
             error: `Search failed: ${e.message}`,
-            hint: "The directory may be inaccessible or 'find' command failed. Check permissions."
+            hint: "The directory may be inaccessible. Check permissions."
         };
     }
 }
@@ -622,7 +619,7 @@ export async function write_file(args) {
         return { error: "No file path provided." };
     }
 
-    const fullPath = path.resolve(process.cwd(), filePath.replace(/^~/, process.env.HOME));
+    const fullPath = path.resolve((process.env.PROJECT_ROOT || process.cwd()), filePath.replace(/^~/, process.env.HOME));
 
     try {
         logDebug(`[DEBUG] Node 2: Writing file to ${fullPath}`);

@@ -132,7 +132,8 @@ export async function record_observation(args) {
 export async function update_project_timeline(args) {
     const { summary } = args;
     // Default to the project root
-    const timelinePath = path.resolve(process.cwd(), 'PROMETHEUS.md');
+    const root = process.env.PROJECT_ROOT || process.cwd();
+    const timelinePath = path.resolve(root, 'PROMETHEUS.md');
 
     try {
         const dateStr = new Date().toISOString().split('T')[0];

@@ -61,6 +61,20 @@
           "description": "Optional: Specific directory to organize. Defaults to downloads/youtube."
         }
       }
+    },
+    "split_youtube_into_songs": {
+      "description": "Downloads a long YouTube 'mix' video and automatically splits it into individual high-quality MP3 tracks based on video chapters or timestamps. Ideal for hour-long mixes with 20+ songs.",
+      "parameters": {
+        "url": {
+          "type": "string",
+          "description": "The YouTube URL of the mix video (e.g., https://www.youtube.com/watch?v=...)"
+        },
+        "output_dir": {
+          "type": "string",
+          "description": "Optional: Specific directory to save the split tracks. Defaults to downloads/youtube/splits."
+        }
+      },
+      "required": ["url"]
     }
   }
 }

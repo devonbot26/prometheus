@@ -175,7 +175,9 @@ export class EmailWatcher {
 
         // History Snapshot & Isolation
         const savedHistory = [...this.agent.history];
+        const savedMode = this.agent.activeMode;
         this.agent.history = []; // Clear for stateless execution
+        this.agent.setMode('primary'); // Reset to primary to enable prefix-based defaulting
 
         try {
             const processWithRetry = async (attempt = 1) => {
@@ -203,8 +205,9 @@ export class EmailWatcher {
 
             const result = await processWithRetry();
 
-            // Restore history
+            // Restore history and mode
             this.agent.history = savedHistory;
+            this.agent.setMode(savedMode);
 
             // Reply with result
             const replyBody = `✅ Instruction Processed: ${subject}\n\nRESULT:\n${result.text}`;
@@ -229,6 +232,7 @@ export class EmailWatcher {
 
         } catch (e) {
             this.agent.history = savedHistory;
+            this.agent.setMode(savedMode);
             console.error(`📧 [EMAIL CMD] Failed: ${subject}`, e.message);
 
             // "Got Errors" Reply

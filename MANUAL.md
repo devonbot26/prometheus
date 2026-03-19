@@ -272,7 +272,6 @@ You can audit or manually override these learned preferences in `config/user_pri
 ---
 ## 🔗 Project Navigation
 - [[README]]: Project overview and features.
-- [[PROMETHEUS]]: Technical timeline and lessons learned.
-- [[NEXT_STEPS]]: Restoration status and upcoming tasks.
+- [[PROMETHEUS]]: Technical timeline and project history.
 - [[MIGRATION_GUIDE]]: Guide for transitioning from Clawdbot.
 - [[GEMINI]]: Core system protocols and rules.

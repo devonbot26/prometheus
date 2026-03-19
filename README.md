@@ -81,7 +81,6 @@ Prometheus stores its memory in `core/history.json` and local SQLite/Vector data
 
 ## 🔗 Documentation
 - [[MANUAL]]: Manual operations and troubleshooting.
-- [[PROMETHEUS]]: Technical timeline and lessons learned.
-- [[NEXT_STEPS]]: Current restoration status.
+- [[PROMETHEUS]]: Technical timeline and project history.
 
 *Built by Devon Wong & Antigravity*

@@ -1,0 +1,9 @@
+{
+    "Qwen3.5-VL-2B": {
+        "PDF to Markdown": {
+            "tps": 3.999487069280966,
+            "duration": 17.227209091186523,
+            "output": "```markdown\n172334 - Manager of Cloud Services - Treasury Board Secretariat - Permanent\nGovernment of PEI\n\n40 Burns Avenue, Charlottetown, Prince Edward Island C1E 1H7\n1 Position available\nPublished on: March 5, 2026\nExpires on: March 20, 2026\n\nJOB DESCRIPTION\n\nThe Treasury Board Secretariat is committed to Equity, Diversity, Inclusion and Accessibility. Our"
+        }
+    }
+}

@@ -48,7 +48,7 @@ export function terminal_run(args, options = {}) {
         // Use HOME as cwd as per Prometheus convention
         const cp = spawn(command, {
             shell: true,
-            cwd: process.env.HOME,
+            cwd: process.env.PROJECT_ROOT || process.env.HOME,
             env: { ...process.env, PAGER: 'cat' } // Prevent interactive pagers
         });
 
@@ -103,7 +103,7 @@ export function terminal_run(args, options = {}) {
             const outputSize = finalOutput.length;
             if (outputSize > 8000) {
                 const bufferId = `buffer_${Date.now()}`;
-                const bufferDir = path.join(process.cwd(), 'logs', 'shadow_buffers');
+                const bufferDir = path.join(process.env.PROJECT_ROOT || process.cwd(), 'logs', 'shadow_buffers');
                 const fs = await import('fs');
                 if (!fs.existsSync(bufferDir)) fs.mkdirSync(bufferDir, { recursive: true });
                 
@@ -139,7 +139,7 @@ export async function peek_buffer({ buffer_id, start_line, lines }) {
         try {
             const fs = await import('fs');
             const path = await import('path');
-            const bufferPath = path.join(process.cwd(), 'logs', 'shadow_buffers', `${buffer_id}.txt`);
+            const bufferPath = path.join(process.env.PROJECT_ROOT || process.cwd(), 'logs', 'shadow_buffers', `${buffer_id}.txt`);
             
             if (!fs.existsSync(bufferPath)) {
                 return resolve({ error: `Buffer ${buffer_id} not found.` });

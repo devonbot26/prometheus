@@ -40,6 +40,8 @@ export async function download_youtube_mp3(args, options = {}) {
             '-x', 
             '--audio-format', 'mp3',
             '--audio-quality', '320K',
+            '--max-downloads', '30', // Safety limit for playlists/mixes
+            '--ignore-errors', // Continue on individual song failures
             '-o', path.join(downloadDir, '%(playlist_title|YouTube)s', '%(title)s.%(ext)s'),
             url
         ];
@@ -78,10 +80,15 @@ export async function download_youtube_mp3(args, options = {}) {
         child.on('close', (code) => {
             clearInterval(activityInterval);
             if (code !== 0) {
-                logDebugError(`[DEBUG] yt-dlp exited with code ${code}. Errors: ${errorLines.join(' | ')}`);
+                const errorDetail = errorLines.join('\n').substring(0, 1000);
+                logDebugError(`[DEBUG] yt-dlp exited with code ${code}. Errors: ${errorDetail}`);
+                
+                // Always log to action log on failure for visibility
+                console.error(`[ERROR] YouTube Download Failed (Code ${code}): ${errorDetail}`);
+                
                 resolve({
                     error: `Download failed with code ${code}`,
-                    details: errorLines.join('\n').substring(0, 1000)
+                    details: errorDetail
                 });
             } else {
                 const resultCount = downloadedFiles.length;
@@ -469,4 +476,169 @@ function getAudioQuality(filePath) {
         logDebugError(`[QUALITY] Error getting quality for ${filePath}: ${e.message}`);
         return { bitrate: 0, size: 0 };
     }
+}
+/**
+ * Downloads a long YouTube mix and splits it into individual songs based on chapters.
+ */
+export async function split_youtube_into_songs(args, options = {}) {
+    const { url, output_dir } = args;
+    const { onStream } = options;
+
+    if (!url || !url.includes('youtu')) return { error: 'Invalid YouTube URL.' };
+
+    const baseDir = output_dir ? path.resolve(output_dir) : path.resolve(process.cwd(), 'downloads', 'youtube', 'splits');
+    if (!fs.existsSync(baseDir)) fs.mkdirSync(baseDir, { recursive: true });
+
+    if (onStream) onStream(`📚 Fetching metadata and chapters for: ${url}...`);
+
+    try {
+        // 1. Get Metadata (Chapters)
+        const metaCmd = `yt-dlp --dump-json --no-playlist "${url}"`;
+        const metaBuffer = execSync(metaCmd, { maxBuffer: 10 * 1024 * 1024 });
+        const metadata = JSON.parse(metaBuffer.toString().trim().split('\n')[0]);
+
+        let chapters = metadata.chapters;
+        if (!chapters || chapters.length === 0) {
+            if (onStream) onStream(`🔍 No official chapters found. Scanning description for timestamps... (${metadata.description?.substring(0, 100)}...)`);
+            chapters = extractChaptersFromDescription(metadata.description, metadata.duration);
+            if (onStream) onStream(`🎸 Parsed ${chapters.length} tracks from description.`);
+        }
+
+        if (!chapters || chapters.length === 0) {
+            // Check if it's a true playlist (list= and not just a radio/mix based on video)
+            const isPlaylist = (metadata._type === 'playlist' || (metadata.entries && metadata.entries.length > 0)) && !url.includes('start_radio=1');
+            
+            if (isPlaylist) {
+                if (onStream) onStream("📂 This URL appears to be an official playlist. Redirecting to standard download...");
+                return download_youtube_mp3({ url, output_dir }, options);
+            }
+
+            if (onStream) onStream("⚠️ No chapters or timestamps found. Splitting not possible.");
+            return { error: "No chapters or timestamps found in this video's metadata or description. Splitting requires a timestamped tracklist." };
+        }
+
+        if (onStream) onStream(`🎸 Found ${chapters.length} chapters/songs in this mix.`);
+
+        // 2. Download the full audio (temporary)
+        const tempFilename = `temp_full_${Date.now()}.mp3`;
+        const tempFilePath = path.join(baseDir, tempFilename);
+        
+        if (onStream) onStream(`💾 Downloading full mix audio (standby)...`);
+        
+        const dlArgs = [
+            '-f', 'bestaudio',
+            '-x', 
+            '--audio-format', 'mp3',
+            '--audio-quality', '320K',
+            '-o', tempFilePath,
+            url
+        ];
+
+        await new Promise((resolve, reject) => {
+            const child = spawn('yt-dlp', dlArgs);
+            child.on('close', (code) => code === 0 ? resolve() : reject(new Error(`yt-dlp failed with code ${code}`)));
+            child.on('error', reject);
+        });
+
+        if (!fs.existsSync(tempFilePath)) throw new Error("Full audio download failed.");
+
+        // 3. Split the file using ffmpeg
+        const splitFiles = [];
+        if (onStream) onStream(`🔪 Splitting audio into ${chapters.length} tracks...`);
+
+        for (let i = 0; i < chapters.length; i++) {
+            const chapter = chapters[i];
+            const startTime = chapter.start_time;
+            const endTime = chapter.end_time;
+            const title = chapter.title.replace(/[<>:"/\\|?*]/g, '');
+            const outputFilename = `${(i + 1).toString().padStart(2, '0')} - ${title}.mp3`;
+            const outputPath = path.join(baseDir, outputFilename);
+
+            if (onStream) onStream(`   [${i + 1}/${chapters.length}] Extracting: ${title}...`);
+
+            // ffmpeg split command
+            // -ss is start time, -to is end time
+            const ffmpegArgs = [
+                '-i', tempFilePath,
+                '-ss', startTime.toString(),
+                '-to', endTime.toString(),
+                '-c', 'copy', // No re-encoding for speed (since both are mp3)
+                '-map_metadata', '0', // Keep global metadata
+                outputPath
+            ];
+
+            await new Promise((resolve, reject) => {
+                const child = spawn('ffmpeg', ffmpegArgs);
+                child.on('close', (code) => code === 0 ? resolve() : reject(new Error(`ffmpeg failed for chapter ${i}`)));
+                child.on('error', reject);
+            });
+
+            splitFiles.push(outputPath);
+        }
+
+        // 4. Cleanup temp full file
+        if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+
+        // 5. Smart Rename (Clean up titles)
+        if (onStream) onStream(`✨ Performing final Smart Rename on the split tracks...`);
+        const finalResults = await performSmartRename(splitFiles, onStream, baseDir);
+
+        return {
+            message: `Successfully split mix into ${chapters.length} tracks and organized them.`,
+            output_directory: baseDir,
+            files: finalResults.slice(0, 5)
+        };
+
+    } catch (e) {
+        logDebugError(`[SPLIT] YouTube split failed: ${e.message}`);
+        return { error: `Splitting failed: ${e.message}` };
+    }
+}
+
+/**
+ * Heuristic to extract chapters from a video description.
+ */
+function extractChaptersFromDescription(description, totalDuration) {
+    if (!description) return [];
+
+    const lines = description.split('\n');
+    const chapterRegex = /(?:^|\s)(\d{1,2}:)?(\d{1,2}:\d{2})(?:\s+[-–—|:]?\s*)(.*)/;
+    const chapters = [];
+
+    for (const line of lines) {
+        const match = line.match(chapterRegex);
+        if (match) {
+            const timeStr = (match[1] || '') + match[2];
+            const title = match[3].trim();
+            
+            // Convert time to seconds
+            const parts = timeStr.split(':').map(Number);
+            let seconds = 0;
+            if (parts.length === 3) {
+                seconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+            } else if (parts.length === 2) {
+                seconds = parts[0] * 60 + parts[1];
+            }
+
+            chapters.push({
+                start_time: seconds,
+                title: title || `Track ${chapters.length + 1}`
+            });
+        }
+    }
+
+    // Sort by time
+    chapters.sort((a, b) => a.start_time - b.start_time);
+
+    // Calculate end times
+    for (let i = 0; i < chapters.length; i++) {
+        if (i < chapters.length - 1) {
+            chapters[i].end_time = chapters[i + 1].start_time;
+        } else {
+            chapters[i].end_time = totalDuration;
+        }
+    }
+
+    // Sanity check: if it extracted fewer than 2 markers, it's not a valid tracklist
+    return chapters.length >= 2 ? chapters : [];
 }

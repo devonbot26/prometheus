@@ -1,0 +1,41 @@
+{
+  "name": "youtube-automation",
+  "description": "Automated workflow for processing YouTube music mixes, including 9B model escalation and multi-track renaming.",
+  "intent": {
+    "triggers": [
+      "automate youtube",
+      "process mix",
+      "split and rename",
+      "youtube automation"
+    ],
+    "context_hints": [
+      "20 songs",
+      "artist name",
+      "singer",
+      "Ronald Cheng",
+      "鄭中基"
+    ]
+  },
+  "streamable": true,
+  "timeout": 900,
+  "tools": {
+    "process_youtube_mix": {
+      "description": "CRITICAL: The tool name is exactly 'process_youtube_mix'. A high-level automation tool that downloads a YouTube mix, splits it into tracks, and renames them using a provided artist name. Automatically handles model escalation to 9B if required.",
+      "parameters": {
+        "url": {
+          "type": "string",
+          "description": "The YouTube URL of the mix video."
+        },
+        "artist": {
+          "type": "string",
+          "description": "The name of the artist to use for renaming (e.g., '鄭中基')."
+        },
+        "expected_tracks": {
+          "type": "number",
+          "description": "Optional: The number of songs expected in the mix (e.g., 20)."
+        }
+      },
+      "required": ["url", "artist"]
+    }
+  }
+}

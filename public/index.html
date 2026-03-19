@@ -430,6 +430,79 @@
             transform: translateX(20px);
             background-color: #fff;
         }
+
+        /* Memory Card Styles */
+        .memory-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(88, 166, 255, 0.1);
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 10px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .memory-card:hover {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(88, 166, 255, 0.3);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+
+        .memory-topic {
+            font-size: 0.7rem;
+            font-weight: 900;
+            color: var(--yellow);
+            letter-spacing: 0.05rem;
+            margin-bottom: 6px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .memory-fact {
+            font-size: 0.9rem;
+            color: var(--text);
+            line-height: 1.4;
+        }
+
+        .memory-tags {
+            margin-top: 8px;
+            display: flex;
+            gap: 6px;
+        }
+
+        .memory-tag {
+            background: rgba(88, 166, 255, 0.1);
+            color: var(--blue);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.65rem;
+            font-weight: bold;
+        }
+
+        /* Role Item Styles */
+        .role-item {
+            padding: 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-bottom: 5px;
+            border: 1px solid transparent;
+            transition: all 0.2s;
+            color: #8b949e;
+        }
+
+        .role-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text);
+        }
+
+        .role-item.active {
+            background: rgba(88, 166, 255, 0.1);
+            border-color: rgba(88, 166, 255, 0.3);
+            color: var(--blue);
+            font-weight: bold;
+        }
     </style>
 </head>
 
@@ -441,6 +514,7 @@
                 <button class="tab-btn active" onclick="switchTab('chat')">Chat Hub</button>
                 <button class="tab-btn" onclick="switchTab('mcp')">MCP Hub</button>
                 <button class="tab-btn" onclick="switchTab('context')">🧠 Context Hub</button>
+                <button class="tab-btn" onclick="switchTab('team')">👥 Team Hub</button>
             </div>
         </div>
         <div id="quota-monitor" style="display: flex; align-items: center; gap: 15px; font-size: 0.75rem;">
@@ -453,6 +527,7 @@
                 <span style="color: #8b949e; font-weight: bold; font-size: 0.7rem;">MEM:</span>
                 <span id="mem-status" style="font-weight: bold; font-size: 0.75rem; color: var(--green);">Healthy</span>
             </div>
+            <button onclick="fixZombies()" style="background: rgba(248, 81, 73, 0.1); color: var(--red); border: 1px solid var(--red); padding: 2px 8px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.7rem;">🧹 Fix Zombies</button>
         </div>
     </div>
     <div id="main">
@@ -472,8 +547,12 @@
         </div>
 
         <div id="mcp-hub-panel" style="display: none; padding: 20px; flex: 1; overflow-y: auto; border-right: 1px solid #30363d;">
+            <div id="mcp-list"></div>
+        </div>
 
         <div id="social-panel" style="display: none; padding: 20px; flex: 1; overflow-y: auto; border-right: 1px solid #30363d;">
+            <div id="social-list"></div>
+        </div>
 
 
         <div id="side-panel">
@@ -487,7 +566,7 @@
             </div>
         </div>
 
-        <div id="context-hub-panel" style="display: none; height: 100%; flex-direction: column; padding: 20px; overflow: hidden;">
+        <div id="context-hub-panel" style="display: none; height: 100%; flex: 1; flex-direction: column; padding: 20px; overflow: hidden;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                 <div>
                     <h2 style="margin:0; margin-bottom: 5px;">🧠 Brain Editor (Context Hub)</h2>
@@ -519,6 +598,34 @@
                     <h3 style="margin: 0; color: var(--blue); font-size: 1rem; border-bottom: 1px dashed #30363d; padding-bottom: 10px;">Interactive History (history.json)</h3>
                     <div id="ctx-history-list" style="display: flex; flex-direction: column; gap: 10px;">
                         <div style="color: #8b949e; font-style: italic;">Loading memory...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="team-hub-panel" style="display: none; height: 100%; flex: 1; flex-direction: column; padding: 20px; overflow: hidden;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <div>
+                    <h2 style="margin:0; margin-bottom: 5px;">👥 Team Management</h2>
+                    <div style="color: #8b949e; font-size: 0.85rem;">Edit the core system personas for your AI team.</div>
+                </div>
+                <button id="save-persona-btn" onclick="savePersona()" style="background: var(--green); color: white; border: none; padding: 8px 18px; border-radius: 4px; font-weight: bold; cursor: pointer; display: none;">Apply Persona</button>
+            </div>
+            
+            <div style="display: flex; gap: 20px; flex: 1; min-height: 0;">
+                <div id="role-list" style="width: 250px; background: var(--term-bg); border: 1px solid #30363d; border-radius: 8px; padding: 15px; overflow-y: auto;">
+                    <div style="color: #8b949e; font-size: 0.75rem; font-weight: bold; margin-bottom: 10px; text-transform: uppercase;">Active Roles</div>
+                    <div id="roles-container"></div>
+                </div>
+                
+                <div id="persona-editor-container" style="flex: 1; background: #000; border: 1px solid #30363d; border-radius: 8px; padding: 20px; display: flex; flex-direction: column;">
+                    <div id="editor-placeholder" style="text-align: center; color: #444; margin-top: 100px;">
+                        <span style="font-size: 3rem; display: block; margin-bottom: 10px;">🎭</span>
+                        Select a role to edit its persona.
+                    </div>
+                    <div id="editor-actual" style="display: none; height: 100%; flex-direction: column;">
+                        <h3 id="editing-role-name" style="margin: 0; margin-bottom: 10px; color: var(--blue);">--</h3>
+                        <textarea id="persona-textarea" style="flex: 1; background: #0d1117; color: var(--text); border: 1px solid #30363d; border-radius: 6px; padding: 15px; font-family: 'Courier New', monospace; font-size: 0.9rem; resize: none; outline: none;"></textarea>
                     </div>
                 </div>
             </div>
@@ -996,22 +1103,33 @@
         }
 
         function switchTab(tab) {
+            // Update Tab Button State
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.getElementById('chat-panel').style.display = tab === 'chat' ? 'flex' : 'none';
-            document.getElementById('mcp-hub-panel').style.display = tab === 'mcp' ? 'block' : 'none';
-            document.getElementById('context-hub-panel').style.display = tab === 'context' ? 'flex' : 'none';
+            const activeBtn = document.querySelector(`.tab-btn[onclick*="'${tab}'"]`);
+            if (activeBtn) activeBtn.classList.add('active');
+
+            // Toggle Panel Visibility
+            const panels = ['chat-panel', 'mcp-hub-panel', 'context-hub-panel', 'team-hub-panel'];
+            panels.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    const isTarget = id === `${tab}-panel` || (id === 'chat-panel' && tab === 'chat') || (id === 'mcp-hub-panel' && tab === 'mcp') || (id === 'context-hub-panel' && tab === 'context') || (id === 'team-hub-panel' && tab === 'team');
+                    el.style.display = isTarget ? (id.includes('hub') || id === 'chat-panel' ? 'flex' : 'block') : 'none';
+                }
+            });
+
+            // Toggle Side Panel (only for Chat Hub)
             if (document.getElementById('side-panel')) {
                 document.getElementById('side-panel').style.display = tab === 'chat' ? 'flex' : 'none';
             }
 
-            if (tab === 'chat') {
-                document.querySelector('.tab-btn[onclick="switchTab(\'chat\')"]').classList.add('active');
-            } else if (tab === 'mcp') {
-                document.querySelector('.tab-btn[onclick="switchTab(\'mcp\')"]').classList.add('active');
+            // Trigger Data Refresh
+            if (tab === 'mcp') {
                 loadMcpServers();
             } else if (tab === 'context') {
-                document.querySelector('.tab-btn[onclick="switchTab(\'context\')"]').classList.add('active');
                 requestContext();
+            } else if (tab === 'team') {
+                socket.emit('refresh_resources');
             }
         }
 
@@ -1080,6 +1198,12 @@
 
         // --- CONTEXT HUB LOGIC ---
         let currentEditableHistory = [];
+
+        function fixZombies() {
+            if (confirm('This will kill all redundant Prometheus processes and restart the model server. Continue?')) {
+                socket.emit('fix_zombies');
+            }
+        }
 
         function requestContext() {
             socket.emit('request_context');
@@ -1196,6 +1320,115 @@
                 // Optionally request a fresh pull to verify
                 setTimeout(requestContext, 500); 
             }
+        }
+
+        // --- TEAM HUB LOGIC ---
+        let currentTeamRoles = [];
+        let currentlyEditingRole = null;
+
+        socket.on('team_info', (roles) => {
+            currentTeamRoles = roles;
+            renderRoleList();
+            
+            // If we were editing a role, update the local text to match server if it changed
+            if (currentlyEditingRole) {
+                const refreshedRole = roles.find(r => r.name === currentlyEditingRole);
+                if (refreshedRole && document.getElementById('persona-textarea').value === '') {
+                    document.getElementById('persona-textarea').value = refreshedRole.prompt;
+                }
+            }
+        });
+
+        function renderRoleList() {
+            const container = document.getElementById('roles-container');
+            if (!container) return;
+            container.innerHTML = '';
+            currentTeamRoles.forEach(role => {
+                const item = document.createElement('div');
+                item.className = 'role-item' + (currentlyEditingRole === role.name ? ' active' : '');
+                item.innerHTML = `<span>🎭</span> ${role.name}`;
+                item.onclick = () => selectRole(role.name);
+                container.appendChild(item);
+            });
+        }
+
+        function selectRole(name) {
+            currentlyEditingRole = name;
+            const role = currentTeamRoles.find(r => r.name === name);
+            if (role) {
+                document.getElementById('editor-placeholder').style.display = 'none';
+                document.getElementById('editor-actual').style.display = 'flex';
+                document.getElementById('save-persona-btn').style.display = 'block';
+                document.getElementById('editing-role-name').innerText = name.toUpperCase();
+                document.getElementById('persona-textarea').value = role.prompt;
+                renderRoleList();
+            }
+        }
+
+        function savePersona() {
+            if (!currentlyEditingRole) return;
+            const prompt = document.getElementById('persona-textarea').value;
+            socket.emit('update_role_prompt', { name: currentlyEditingRole, prompt: prompt });
+            log(`🎭 Saving persona for ${currentlyEditingRole}...`);
+            
+            // Visual feedback
+            const btn = document.getElementById('save-persona-btn');
+            const originalText = btn.innerText;
+            btn.innerText = '✅ SAVED';
+            btn.style.background = '#2ea043';
+            setTimeout(() => {
+                btn.innerText = originalText;
+                btn.style.background = 'var(--green)';
+            }, 2000);
+        }
+
+        // --- MEMORY UX LOGIC ---
+        socket.on('memories_info', (memories) => {
+            renderMemoriesInHub(memories);
+        });
+
+        function renderMemoriesInHub(memories) {
+            let memorySection = document.getElementById('ctx-memories-list');
+            if (!memorySection) {
+                const contextPanel = document.getElementById('context-hub-panel');
+                if (!contextPanel) return;
+                const leftColumn = contextPanel.querySelector('div > div'); 
+                const h3 = document.createElement('h3');
+                h3.style.margin = '20px 0 10px 0';
+                h3.style.color = 'var(--blue)';
+                h3.style.fontSize = '1rem';
+                h3.innerText = 'Permanent Memories (Obsidian)';
+                leftColumn.appendChild(h3);
+                
+                memorySection = document.createElement('div');
+                memorySection.id = 'ctx-memories-list';
+                memorySection.style.maxHeight = '400px';
+                memorySection.style.overflowY = 'auto';
+                memorySection.style.paddingRight = '5px';
+                leftColumn.appendChild(memorySection);
+            }
+
+            memorySection.innerHTML = '';
+            if (!memories || memories.length === 0) {
+                memorySection.innerHTML = '<div style="color: #444; font-style: italic; font-size: 0.75rem;">No permanent memories indexed.</div>';
+                return;
+            }
+
+            memories.forEach(m => {
+                const card = document.createElement('div');
+                card.className = 'memory-card';
+                card.innerHTML = `
+                    <div class="memory-topic">
+                        <span>${m.topic.toUpperCase()}</span>
+                        <span style="opacity: 0.5;">${m.timestamp.substring(0, 10)}</span>
+                    </div>
+                    <div class="memory-fact">${m.fact}</div>
+                    <div class="memory-tags">
+                        ${m.tags.map(t => `<span class="memory-tag">#${t}</span>`).join('')}
+                    </div>
+                `;
+                memorySection.appendChild(card);
+            });
         }
     </script>
 </body>

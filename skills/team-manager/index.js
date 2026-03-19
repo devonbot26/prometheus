@@ -211,10 +211,12 @@ export async function mark_step_done(args) {
     state.steps[stepIndex].result = result;
 
     fs.writeFileSync(PM_STATE_PATH, JSON.stringify(state, null, 2));
+    const nextStep = state.steps.find(s => s.status === 'pending');
 
     return {
         message: `Step ${step_id} marked as ${status}.`,
-        next_step: state.steps.find(s => s.status === 'pending') || null
+        next_step: nextStep || null,
+        auto_continue: !!nextStep // Trigger next thought if more steps exist
     };
 }
 

@@ -5,48 +5,50 @@ import { logDebug, logDebugError } from './logger.js';
  * Routes requests to Gemini (cloud) or Qwen (local) based on availability.
  */
 
-function getLocalUrl() {
-    const port = process.env.LLM_PORT || 18888;
-    return `http://127.0.0.1:${port}`;
+const PORT_FAST  = parseInt(process.env.LLAMA_PORT || '18888');
+const PORT_HEAVY = parseInt(process.env.LLM_PORT_HEAVY || '18889');
+
+function getLocalUrl(port) {
+    return `http://127.0.0.1:${port || PORT_FAST}`;
+}
+
+async function isPortAvailable(port) {
+    try {
+        const res = await fetch(`http://127.0.0.1:${port}/v1/models`, { signal: AbortSignal.timeout(2000) });
+        if (res.ok) return true;
+        const res2 = await fetch(`http://127.0.0.1:${port}/models`, { signal: AbortSignal.timeout(2000) });
+        return res2.ok;
+    } catch { return false; }
 }
 const GEMINI_MODEL = 'gemini-2.0-flash';
 
-const LOCAL_MODEL_4B = process.env.LLM_MODEL || 'Jackrong/MLX-Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-4bit';
-const LOCAL_MODEL_9B = process.env.LLM_MODEL_9B || 'Jackrong/MLX-Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-4bit'; // Universal default
+const LOCAL_MODEL_DEFAULT = process.env.LLM_MODEL || 'mlx-community/Qwen3.5-2B-MLX-4bit';
+const LOCAL_MODEL_HEAVY  = process.env.LLM_MODEL_HEAVY || 'Jackrong/MLX-Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-4bit';
 
 /**
  * Check if local LLM server is available
  */
 async function isLocalAvailable() {
-    try {
-        // Try the standard /v1/models first
-        let res = await fetch(`${getLocalUrl()}/v1/models`, { signal: AbortSignal.timeout(2000) });
-        if (res.ok) return true;
-
-        // Try the mlx_vlm fallback endpoint
-        res = await fetch(`${getLocalUrl()}/models`, { signal: AbortSignal.timeout(2000) });
-        return res.ok;
-    } catch {
-        return false;
-    }
+    return await isPortAvailable(PORT_FAST) || await isPortAvailable(PORT_HEAVY);
 }
 
 /**
  * Call Local LLM with retry logic
  */
-async function callLocal(messages, options = {}, targetModelOverride = null) {
+async function callLocal(messages, options = {}, targetModelOverride = null, targetPort = null) {
     const maxRetries = 3;
     let attempt = 0;
 
     while (attempt < maxRetries) {
-        const targetModel = targetModelOverride || (options.deepThinking ? LOCAL_MODEL_9B : LOCAL_MODEL_4B);
-        console.log(`[DEBUG] Calling ${getLocalUrl()}${targetModel.toLowerCase().includes('vl') || targetModel.toLowerCase().includes('qwen3.5') ? '/chat/completions' : '/v1/chat/completions'} (Attempt ${attempt + 1}/${maxRetries})`);
+        const targetModel = targetModelOverride || (options.deepThinking ? LOCAL_MODEL_HEAVY : LOCAL_MODEL_DEFAULT);
+        const urlPrefix = getLocalUrl(targetPort);
+        console.log(`[DEBUG] Calling ${urlPrefix}${targetModel.toLowerCase().includes('vl') || targetModel.toLowerCase().includes('qwen3.5') ? '/chat/completions' : '/v1/chat/completions'} (Attempt ${attempt + 1}/${maxRetries})`);
         try {
             const startTime = Date.now();
 
             // VL models launched via start_llama.sh currently use mlx_vlm, which omits the /v1 prefix.
             const modelNameLower = targetModel.toLowerCase();
-            const isVL = modelNameLower.includes('vl');
+            const isVL = modelNameLower.includes('vl') || modelNameLower.includes('qwen3.5');
             // mlx_vlm (used for Qwen3.5/VL) often exposes /chat/completions instead of /v1/chat/completions
             const endpoint = isVL ? '/chat/completions' : '/v1/chat/completions';
 
@@ -60,7 +62,7 @@ async function callLocal(messages, options = {}, targetModelOverride = null) {
             };
             if (!isVL) reqBody.adapters = options.adapterPath || null;
 
-            const res = await fetch(`${getLocalUrl()}${endpoint}`, {
+            const res = await fetch(`${urlPrefix}${endpoint}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(reqBody),
@@ -122,14 +124,13 @@ async function callLocal(messages, options = {}, targetModelOverride = null) {
 /**
  * Call Local Model (Streaming)
  */
-async function callLocalStreaming(messages, options = {}, targetModelOverride = null) {
-    const targetModel = targetModelOverride || (options.deepThinking ? LOCAL_MODEL_9B : LOCAL_MODEL_4B);
-    const modelNameLower = targetModel.toLowerCase();
-    const isVL = modelNameLower.includes('vl');
-    const endpoint = isVL ? '/chat/completions' : '/v1/chat/completions';
+async function callLocalStreaming(messages, options = {}, targetModelOverride = null, targetPort = null) {
+    const targetModel = targetModelOverride || (options.deepThinking ? LOCAL_MODEL_HEAVY : LOCAL_MODEL_DEFAULT);
+    const endpoint = '/v1/chat/completions';
     console.log(`[DEBUG] Selected endpoint: ${endpoint} for model: ${targetModel}`);
 
-    console.log(`[DEBUG] Calling ${getLocalUrl()}${endpoint} with stream: true`);
+    const urlPrefix = getLocalUrl(targetPort);
+    console.log(`[DEBUG] Calling ${urlPrefix}${endpoint} with stream: true`);
 
     // TTFT Watchdog (Time To First Token) implementation with AbortController integration
     const watchdogController = new AbortController();
@@ -152,14 +153,16 @@ async function callLocalStreaming(messages, options = {}, targetModelOverride = 
         reqBody.adapters = options.adapterPath;
     }
 
+    const isHeavyModel = targetModel === process.env.LLM_MODEL_HEAVY || targetModel.toLowerCase().includes('9b') || targetModel.toLowerCase().includes('14b');
+    const ttftSeconds = isHeavyModel ? 120 : 60;
     let ttftTimeout = setTimeout(() => {
         if (!firstTokenTime) {
-            console.error(`🚨 [TIMEOUT] TTFT Watchdog triggered! No tokens after 90s. Aborting server connection.`);
+            console.error(`🚨 [TIMEOUT] TTFT Watchdog triggered! No tokens after ${ttftSeconds}s. Aborting server connection.`);
             watchdogController.abort();
         }
-    }, 90000);
+    }, ttftSeconds * 1000);
 
-    const res = await fetch(`${getLocalUrl()}${endpoint}`, {
+    const res = await fetch(`${urlPrefix}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(reqBody),
@@ -189,7 +192,7 @@ async function callLocalStreaming(messages, options = {}, targetModelOverride = 
         // High-level watchdog: if we stick in reader.read() too long, abort
         const readPromise = reader.read();
         const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error("STREAM_READ_TIMEOUT")), 90000)
+            setTimeout(() => reject(new Error("STREAM_READ_TIMEOUT")), 60000)
         );
 
         let value, done;
@@ -204,6 +207,7 @@ async function callLocalStreaming(messages, options = {}, targetModelOverride = 
         
         if (done) {
             clearTimeout(ttftTimeout);
+            streamDone = true;
             break;
         }
 
@@ -214,24 +218,27 @@ async function callLocalStreaming(messages, options = {}, targetModelOverride = 
         }
 
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
+        let lines = buffer.split('\n');
+        // Keep the last partial line in the buffer
         buffer = lines.pop() || '';
 
         for (const line of lines) {
-            if (line.trim() === '') continue;
-            if (line.startsWith('data: ')) {
-                const dataStr = line.substring(6).trim();
+            const trimmedLine = line.trim();
+            if (!trimmedLine) continue;
+            
+            if (trimmedLine.startsWith('data: ')) {
+                const dataStr = trimmedLine.substring(6).trim();
 
                 if (dataStr === '[DONE]') {
                     streamDone = true;
-                    continue;
+                    break;
                 }
 
                 try {
-                    const data = JSON.parse(dataStr);
-                    if (data.choices && data.choices.length > 0) {
-                        const delta = data.choices[0].delta || {};
-                        const chunkContent = delta.content || '';
+                    const json = JSON.parse(dataStr);
+                    if (json.choices && json.choices[0] && json.choices[0].delta) {
+                        const delta = json.choices[0].delta;
+                        const chunkContent = delta.content || delta.text || ''; 
                         const chunkReasoning = delta.reasoning || '';
 
                         if (chunkContent) {
@@ -255,6 +262,7 @@ async function callLocalStreaming(messages, options = {}, targetModelOverride = 
                 }
             }
         }
+        if (streamDone) break;
     }
 
     const endTime = Date.now();
@@ -362,7 +370,19 @@ export async function chat(messages, options = {}) {
     const modelToUse = options.forceModel || modelOverride;
 
     // Determine target local model
-    const targetLocalModel = options.modelId || (options.deepThinking ? LOCAL_MODEL_9B : LOCAL_MODEL_4B);
+    const targetLocalModel = options.modelId || (options.fast ? LOCAL_MODEL_DEFAULT : (options.deepThinking ? LOCAL_MODEL_HEAVY : LOCAL_MODEL_DEFAULT));
+
+    // Determine which port to use
+    const isHeavyModel = targetLocalModel === LOCAL_MODEL_HEAVY;
+    let targetPort = isHeavyModel ? PORT_HEAVY : PORT_FAST;
+
+    // Fallback: if 2B server is down, route to heavy port
+    if (!isHeavyModel && !(await isPortAvailable(PORT_FAST))) {
+        if (await isPortAvailable(PORT_HEAVY)) {
+            console.log(`⚡ [ROUTING] 2B server offline. Falling back to 9B on port ${PORT_HEAVY}.`);
+            targetPort = PORT_HEAVY;
+        }
+    }
 
     // 0. Respect explicit overrides
     if (modelToUse === 'gemini') {
@@ -371,7 +391,9 @@ export async function chat(messages, options = {}) {
     }
 
     if (modelToUse === 'local' && await isLocalAvailable()) {
-        const result = options.onToken ? await callLocalStreaming(messages, options, targetLocalModel) : await callLocal(messages, options, targetLocalModel);
+        const result = options.onToken ? 
+            await callLocalStreaming(messages, options, targetLocalModel, targetPort) : 
+            await callLocal(messages, options, targetLocalModel, targetPort);
         return { ...result, model: 'local' };
     }
 
@@ -381,13 +403,14 @@ export async function chat(messages, options = {}) {
     const isRunningTarget = availableModels.includes(targetLocalModel);
 
     if (localUp && !isRunningTarget) {
-        console.log(`🔄 Model mismatch! Available: ${availableModels.join(', ')}. Target: ${targetLocalModel}. Requesting restart...`);
+        console.log(`🔄 Model mismatch for port ${targetPort}! Available: ${availableModels.join(', ')}. Target: ${targetLocalModel}.`);
         if (process.send) {
-            process.send({ type: 'RESTART_LLAMA', model: targetLocalModel });
+            const restartType = targetPort === PORT_HEAVY ? 'START_HEAVY_SERVER' : 'RESTART_LLAMA';
+            process.send({ type: restartType, model: targetLocalModel });
 
             console.log('⏳ Waiting for model switch...');
             let attempts = 0;
-            while (attempts < 180) { // Up to 180s for 14B+ models
+            while (attempts < 300) { // Up to 300s for 9B/14B+ models
                 await new Promise(r => setTimeout(r, 1000));
                 const newModels = await getLocalModels();
                 if (newModels.includes(targetLocalModel)) {
@@ -398,7 +421,7 @@ export async function chat(messages, options = {}) {
                 }
                 attempts++;
             }
-            if (attempts >= 180) {
+            if (attempts >= 300) {
                 console.warn(`⚠️ Timeout waiting for model switch: ${targetLocalModel}. Proceeding anyway (may fail).`);
             }
         }
@@ -412,7 +435,7 @@ export async function chat(messages, options = {}) {
 
         console.log('⏳ Waiting for server startup...');
         let attempts = 0;
-        while (attempts < 180) { // Increased to 3 minutes for slow model loads
+        while (attempts < 300) { // Increased to 5 minutes for slow model loads
             await new Promise(r => setTimeout(r, 1000));
             if (await isLocalAvailable()) {
                 await new Promise(r => setTimeout(r, 2000)); // Additional buffer for memory mapping
@@ -421,7 +444,7 @@ export async function chat(messages, options = {}) {
             }
             attempts++;
         }
-        if (attempts >= 180) {
+        if (attempts >= 300) {
             throw new Error(`Timeout waiting for Llama Server to load model: ${targetLocalModel}`);
         }
     } else {
@@ -435,7 +458,7 @@ export async function chat(messages, options = {}) {
         // Derive a readable model identifier from LLM_MODEL
         const modelStr = process.env.LLM_MODEL || 'local';
         const modelBase = modelStr.split('/').pop();
-        const sizeMatch = modelBase.match(/(\\d+[Bb])/);
+        const sizeMatch = modelBase.match(/(\d+[Bb])/);
         const modelName = modelBase.split('-')[0].toLowerCase();
         const modelSize = sizeMatch ? sizeMatch[1].toLowerCase() : 'local';
         const modelId = `${modelName}-${modelSize}-local`;

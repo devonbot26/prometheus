@@ -20,6 +20,26 @@ import { memoryManager } from '../core/memory-manager.js';
 import { initCronJobs } from '../core/cron.js';
 import { INTENT_SCHEMA } from '../core/decision-tree.js';
 import { projectIndexer } from '../services/project-indexer.js';
+import os from 'os';
+
+// Configuration persistence
+const USER_CONFIG_PATH = path.resolve(process.cwd(), 'config.json');
+let userConfig = {
+    PROJECT_ROOT: process.cwd(),
+    DOCUMENTS_ROOT: path.join(os.homedir(), 'Documents')
+};
+
+try {
+    if (fs.existsSync(USER_CONFIG_PATH)) {
+        const saved = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, 'utf-8'));
+        userConfig = { ...userConfig, ...saved };
+    }
+    // Set environment variables for core logic to consume
+    process.env.PROJECT_ROOT = userConfig.PROJECT_ROOT;
+    process.env.DOCUMENTS_ROOT = userConfig.DOCUMENTS_ROOT;
+} catch (e) {
+    console.error('⚠️ [WEB] Failed to load config.json:', e.message);
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, '../public');
@@ -188,6 +208,16 @@ io.on('connection', (socket) => {
     // Send initial boot sequence
     socket.emit('clear_console');
     socket.emit('status', 'System Initializing...');
+
+    // Native Action Result Forwarder (for macos-control skill)
+    // The skill emits via global.io (broadcast) but cannot listen on it.
+    // This forwards client responses to the global callback registry.
+    socket.on('native_action_result', (result) => {
+        if (global._nativeActionCallback) {
+            global._nativeActionCallback(result);
+            global._nativeActionCallback = null;
+        }
+    });
     
     // Boot Phase Simulation/Check
     const bootPhases = [
@@ -214,10 +244,14 @@ io.on('connection', (socket) => {
 
     // Send stats, history (delayed), and model on connection
     socket.emit('usage', agent.quotaTracker.getStats());
-    socket.emit('model_info', process.env.LLM_MODEL || 'Unknown');
+    // Initial state sync
+    socket.emit('model_info', process.env.LLM_MODEL || 'default');
+    socket.emit('mlx_status', { state: currentMlxState, model: process.env.LLM_MODEL });
+    socket.emit('config_info', userConfig);
     broadcastSkills(socket);
     broadcastKnowledge(socket);
     broadcastMemories(socket);
+    broadcastTeamInfo(socket);
     broadcastContext(socket);
     
     // Lazy history load
@@ -265,12 +299,8 @@ io.on('connection', (socket) => {
 
         try {
             socket.emit('status', 'Thinking...');
-            if (autoStep === 0) {
-                // socket.emit('message', { role: 'user', content: text }); // REMOVED: Handled by agent.on('message') broadcast below
-            }
-
+            
             const result = await (async () => {
-                // Heartbeat to parent to prevent idle timeout during long reasoning
                 const heartbeatInterval = setInterval(sendHeartbeat, 30000);
                 const originalMode = agent.activeMode;
                 try {
@@ -290,7 +320,6 @@ io.on('connection', (socket) => {
                 }
             })();
 
-
             // Handle Auto-Continue Relay (Agent-to-Agent)
             if (result.auto_continue && autoStep < 10) {
                 const handoffPath = path.resolve(process.cwd(), 'HANDOFF.json');
@@ -299,44 +328,29 @@ io.on('connection', (socket) => {
                     const wakeUp = handoff.context;
                     const targetRole = handoff.to;
 
-                    // Phase 48: Intelligent Brain Routing interceptor
                     const roleConfig = ROLE_MODEL_MAP[targetRole] || ROLE_MODEL_MAP[`team-${targetRole}`];
                     const activeModel = process.env.LLM_MODEL || "";
                     
                     if (roleConfig && roleConfig.modelId && roleConfig.modelId !== activeModel) {
-                        console.log(`\n🧠 [ROUTER] Role ${targetRole} requires model: ${roleConfig.modelId}`);
-                        console.log(`\x1b[33m🔄 [ROUTER] Hot-swapping model from ${activeModel} to specialized brain...\x1b[0m`);
-                        
                         socket.emit('status', `Swapping brain for ${targetRole}...`);
-                        socket.emit('log', `🧠 Brain change: Switching to specialized ${targetRole} model.`);
-
                         if (process.send) {
                             process.send({ type: 'RESTART_LLAMA', model: roleConfig.modelId });
-                            
-                            // Wait for model update before continuing
                             await new Promise((resolveWait) => {
-                                const timeout = setTimeout(() => {
-                                    console.warn('⚠️ [ROUTER] Brain swap timed out. Proceeding with current model.');
-                                    resolveWait();
-                                }, 60000); // 60s max wait
-                                
-                                const modelUpdateHandler = (m) => {
+                                const timeout = setTimeout(resolveWait, 60000);
+                                const handler = (m) => {
                                     if (m.type === 'MODEL_UPDATED' && m.model === roleConfig.modelId) {
                                         clearTimeout(timeout);
-                                        process.removeListener('message', modelUpdateHandler);
-                                        console.log(`✅ [ROUTER] Brain swap complete. Resuming task.`);
+                                        process.removeListener('message', handler);
                                         resolveWait();
                                     }
                                 };
-                                process.on('message', modelUpdateHandler);
+                                process.on('message', handler);
                             });
                         }
                     }
 
-                    console.log(`\n🤖 Web Relay [Step ${autoStep + 1}/10]: Waking ${handoff.to}...\n`);
-                    
                     agent.setMode(handoff.to);
-                    isProcessingQueue = false;
+                    isProcessingQueue = false; // Release for recursion
                     requestQueue.unshift({ text: wakeUp, resolve, reject });
                     return processQueue(autoStep + 1);
                 }
@@ -347,12 +361,8 @@ io.on('connection', (socket) => {
             reject(e);
         } finally {
             isProcessingQueue = false;
-            if (requestQueue.length > 0) {
-                socket.emit('status', `Queued (${requestQueue.length} pending)...`);
-                processQueue();
-            } else {
-                socket.emit('status', 'Idle');
-            }
+            socket.emit('status', requestQueue.length > 0 ? `Queued (${requestQueue.length} pending)...` : 'Idle');
+            processQueue(); 
         }
     };
 
@@ -374,6 +384,45 @@ io.on('connection', (socket) => {
         }
     });
 
+    // Fix 1: Zombie process cleanup handler
+    socket.on('fix_zombies', async () => {
+        console.log('🧹 [WEB] fix_zombies triggered. Killing orphan processes...');
+        socket.emit('log', '🧹 Cleaning up zombie processes...');
+        
+        try {
+            // Kill all MLX server processes by name
+            try { execSync('pkill -9 -f "mlx_vlm.server"'); } catch (e) {}
+            try { execSync('pkill -9 -f "mlx_lm"'); } catch (e) {}
+            try { execSync('pkill -9 -f "uvicorn"'); } catch (e) {}
+            
+            // Kill anything on the MLX port
+            try {
+                const pids = execSync('lsof -ti:18888').toString().trim();
+                if (pids) execSync(`kill -9 ${pids.split('\n').join(' ')}`);
+            } catch (e) {}
+            
+            // Signal supervisor to restart cleanly
+            if (process.send && process.connected) {
+                process.send({ type: 'RESTART_LLAMA', model: process.env.LLM_MODEL, forceClean: true });
+            }
+            
+            socket.emit('log', '✅ Zombie cleanup complete. Server restarting...');
+            socket.emit('message', { role: 'assistant', content: '🧹 Zombie processes cleared. MLX server is restarting.' });
+        } catch (e) {
+            socket.emit('log', `❌ Cleanup error: ${e.message}`);
+        }
+    });
+
+    // Fix 2: Abort agent work when clients disconnect (prevents orphaned processing)
+    socket.on('disconnect', (reason) => {
+        console.log(`🔌 [WEB] Client disconnected: ${reason}`);
+        if (agent.processing && agent.abortController) {
+            console.log('🛑 [WEB] Aborting in-progress agent task due to client disconnect.');
+            agent.abortController.abort();
+        }
+        requestQueue.length = 0; // Clear any pending requests for this socket
+    });
+
     // Handle incoming messages from UI
     socket.on('message', async (data) => {
         sendHeartbeat();
@@ -390,11 +439,13 @@ io.on('connection', (socket) => {
                     '1': 'mlx-community/DeepSeek-R1-Distill-Qwen-14B-abliterated-v2-Q4-mlx',
                     '2': 'mlx-community/Qwen2.5-Coder-14B-4bit',
                     '3': 'Jackrong/MLX-Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-4bit',
-                    '4': '/Users/nelsonwong/Documents/projects/Prometheus/models/Qwen3.5-9B-Claude-Abliterated-mxfp4'
+                    '4': '/Users/nelsonwong/Documents/projects/Prometheus/models/Qwen3.5-9B-Claude-Abliterated-mxfp4',
+                    '5': 'mlx-community/Qwen3.5-2B-MLX-4bit',
+                    '2b': 'mlx-community/Qwen3.5-2B-MLX-4bit'
                 };
                 const modelId = MODEL_ID_MAP[arg] || arg;
                 if (!modelId) {
-                    socket.emit('message', { role: 'assistant', content: `🧠 Usage: /model [id|name]\nPresets: 1(DeepSeek), 2(Coder), 3(Qwen9B), 4(MXFP4-9B)` });
+                    socket.emit('message', { role: 'assistant', content: `🧠 Usage: /model [id|name]\nPresets: 1(DeepSeek), 2(Coder), 3(Qwen9B), 4(MXFP4-9B), 5(Qwen2B)` });
                     return;
                 }
                 if (process.send) {
@@ -459,8 +510,23 @@ io.on('connection', (socket) => {
 
     socket.on('skill_toggle', (data) => {
         const { name, enabled } = data;
-        agent.toggleSkill(name, enabled);
-        broadcastSkills(); // Refresh all clients
+        const skill = agent.skills.get(name); // Use .get() for Map
+        if (skill) {
+            agent.toggleSkill(name, enabled); // Use agent's method to update internal state
+            console.log(`🔌 [WEB] Skill ${name} ${enabled ? 'ENABLED' : 'DISABLED'}`);
+            broadcastSkills();
+        }
+    });
+
+    socket.on('update_config', (newConfig) => {
+        console.log('⚙️ [WEB] Syncing global configuration:', newConfig);
+        userConfig = { ...userConfig, ...newConfig };
+        
+        if (newConfig.PROJECT_ROOT) process.env.PROJECT_ROOT = newConfig.PROJECT_ROOT;
+        if (newConfig.DOCUMENTS_ROOT) process.env.DOCUMENTS_ROOT = newConfig.DOCUMENTS_ROOT;
+        
+        fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(userConfig, null, 2));
+        io.emit('config_info', userConfig);
     });
  
     // Manual Refresh Requests
@@ -468,7 +534,28 @@ io.on('connection', (socket) => {
         broadcastSkills(socket);
         broadcastKnowledge(socket);
         broadcastMemories(socket);
+        broadcastTeamInfo(socket);
         await broadcastContext();
+    });
+
+    socket.on('update_role_prompt', async (data) => {
+        const { name, prompt } = data;
+        try {
+            const promptsDir = path.join(process.cwd(), 'prompts');
+            const filePath = path.join(promptsDir, `${name}.md`);
+            if (fs.existsSync(filePath)) {
+                fs.writeFileSync(filePath, prompt, 'utf-8');
+                console.log(`🎭 [WEB] Persona for ${name} updated by user.`);
+                socket.emit('log', `✅ Persona for **${name}** updated and persisted.`);
+                // Re-broadcast to all to sync UI
+                broadcastTeamInfo();
+            } else {
+                socket.emit('log', `⚠️ Role file not found: ${name}.md`);
+            }
+        } catch (e) {
+            console.error('Error updating role prompt:', e);
+            socket.emit('log', `❌ Failed to update persona: ${e.message}`);
+        }
     });
  
     // --- CONTEXT HUB ENDPOINTS ---
@@ -589,6 +676,31 @@ function broadcastMemories(socket = null) {
     }
 }
 
+/**
+ * Broadcasts team roles and their prompts
+ */
+function broadcastTeamInfo(socket = null) {
+    const promptsDir = path.join(process.cwd(), 'prompts');
+    const roles = [];
+    
+    if (fs.existsSync(promptsDir)) {
+        const files = fs.readdirSync(promptsDir).filter(f => f.endsWith('.md'));
+        files.forEach(file => {
+            const roleName = file.replace('.md', '');
+            const content = fs.readFileSync(path.join(promptsDir, file), 'utf-8');
+            roles.push({
+                name: roleName,
+                prompt: content
+            });
+        });
+    }
+
+    const target = socket || global.io;
+    if (target) {
+        target.emit('team_info', roles);
+    }
+}
+
 // Bind Agent Events to Socket.io
 // Moved outside io.on('connection') to prevent duplicate listeners on reconnect
 agent.on('message', (msg) => {
@@ -647,7 +759,7 @@ agent.on('intent_trace', (data) => {
 
 // Start Server
 const PORT = 3000;
-import os from 'os';
+
 
 httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`\n🚀 Prometheus Dashboard: http://localhost:${PORT}`);

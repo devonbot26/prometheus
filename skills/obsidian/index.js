@@ -12,9 +12,8 @@ function execObsidian(cmd, options = {}) {
     return execSync(cmd, { ...options, timeout: 5000 });
 }
 
-// Default vault path from system config
-// Default vault path relative to user home
-const DEFAULT_VAULT = path.join(process.env.HOME, 'Documents/Obsidian/My iMac notebooks');
+// Default vault path from system config or environment
+const DEFAULT_VAULT = process.env.DOCUMENTS_ROOT || path.join(process.env.HOME, 'Documents/Obsidian/My iMac notebooks');
 
 function getVaultPath(providedPath) {
     return providedPath || DEFAULT_VAULT;

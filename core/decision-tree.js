@@ -16,7 +16,7 @@ import path from 'path';
 export let INTENT_SCHEMA = {
     'gmail': {
         triggers: ['email', 'gmail', 'inbox', 'draft', 'send mail', 'unread', 'new email', 'check inbox'],
-        context_hints: ['message', 'contact', 'threads', 'reply', 'mail']
+        context_hints: ['message', 'threads', 'reply', 'mail'] // Removed 'contact' to avoid misfire on people names
     },
     'google-drive': {
         triggers: ['drive', 'google drive', 'backup memory', 'restore memory'],
@@ -64,7 +64,7 @@ export let INTENT_SCHEMA = {
     },
     'youtube-downloader': {
         triggers: ['download', 'mp3', 'convert to audio', 'save video'],
-        context_hints: ['playlist', 'song', 'music', 'quality']
+        context_hints: ['playlist', 'song', 'music', 'quality', 'artist', 'singer', 'mix', 'chapters']
     },
     'obsidian': {
         triggers: ['obsidian', 'vault', 'note'],

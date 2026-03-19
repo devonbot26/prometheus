@@ -9,9 +9,13 @@ import fetch from 'node-fetch';
 // Configuration
 const LLAMA_PORT = 18888;
 const WEB_PORT = 3000;
-const CHECK_INTERVAL = 90000;
-const HEALTH_TIMEOUT = 120000; // Increased to 120s for slower model loads
+const CHECK_INTERVAL = 30000; // Reduced to 30s for faster memory response
+const HEALTH_TIMEOUT = 300000;
 const STARTUP_SCRIPT = './scripts/start_llama.sh';
+
+const HEAVY_PORT = 18889;
+let heavyServerProcess = null;
+let heavyServerModel = null;
 
 // ANSI Colors
 const C = {
@@ -100,7 +104,7 @@ if (freeMB < 1000) {
     if (isHeavy) {
         console.log(`${C.yellow}💡 Recommendation: Close unnecessary apps (Chrome/Docker) to free up RAM.${C.reset}\n`);
     } else {
-        console.log(`${C.yellow}💡 Recommendation: Consider staying on Qwen3.5 9B for optimal M1 performance.${C.reset}\n`);
+        console.log(`${C.yellow}💡 Recommendation: Using ${currentModel.includes('2B') ? 'Ultra-Fast 2B' : 'Qwen3.5 9B'} for optimal local performance.${C.reset}\n`);
     }
 }
 
@@ -189,7 +193,7 @@ function startLlamaServer(modelName) {
         }
     }
 
-    const model = modelName || process.env.LLM_MODEL || 'mlx-community/Qwen3.5-9B-Instruct-4bit';
+    const model = modelName || process.env.LLM_MODEL || 'mlx-community/Qwen3.5-2B-4bit';
     const logFile = createWriteStream('./logs/mlx_server.log', { flags: 'a' });
 
     console.log(`${C.dim}Environment: ${pythonPath}${C.reset}`);
@@ -199,7 +203,7 @@ function startLlamaServer(modelName) {
     const modelLow = model.toLowerCase();
     let adapterDir = null;
 
-    if (modelLow.includes('qwen3.5')) {
+    if (modelLow.includes('qwen3.5-9b')) {
         adapterDir = path.join(process.cwd(), 'adapters', 'qwen3.5-9b');
     }
 
@@ -213,7 +217,7 @@ function startLlamaServer(modelName) {
     // Use the optimized shell script for startup if it exists
     if (existsSync(STARTUP_SCRIPT)) {
         console.log(`${C.green}✨ Using startup script: ${STARTUP_SCRIPT}${C.reset}`);
-        serverProcess = spawn('bash', [STARTUP_SCRIPT, model], {
+        serverProcess = spawn('bash', [STARTUP_SCRIPT, model, process.env.DRAFT_MODEL || ''], {
             stdio: 'pipe',
             detached: true, // Group processes for clean shutdown
             env: { ...process.env, PORT: LLAMA_PORT }
@@ -234,6 +238,50 @@ function startLlamaServer(modelName) {
         logFile.write(`[ERROR] Failed to start process: ${err.message}\n`);
     });
 
+    // Fix 3: Track MLX process exit to clear stale PID and update state
+    serverProcess.on('close', (code, signal) => {
+        console.log(`${C.yellow}⚠️  MLX Server process exited (code=${code}, signal=${signal})${C.reset}`);
+        if (!isCleaningUp && !isRestarting) {
+            broadcastState('offline');
+        }
+        serverProcess = null;
+    });
+
+}
+
+/**
+ * Starts the Heavy Llama Server on port 18889
+ */
+function startHeavyServer(modelName) {
+    const model = modelName || process.env.LLM_MODEL_HEAVY || 'Jackrong/MLX-Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-4bit';
+    console.log(`${C.magenta}🚀 Starting Heavy Llama Server on port ${HEAVY_PORT} with ${model}...${C.reset}`);
+
+    const logFile = createWriteStream('./logs/mlx_heavy.log', { flags: 'a' });
+
+    if (existsSync(STARTUP_SCRIPT)) {
+        heavyServerProcess = spawn('bash', [STARTUP_SCRIPT, model], {
+            stdio: 'pipe',
+            detached: true,
+            env: { ...process.env, PORT: HEAVY_PORT }
+        });
+    } else {
+        const pythonPath = 'python3';
+        heavyServerProcess = spawn(pythonPath, ['-m', 'mlx_lm', 'server', '--model', model, '--port', HEAVY_PORT, '--trust-remote-code'], {
+            stdio: 'pipe',
+            detached: true
+        });
+    }
+
+    heavyServerProcess.stdout.pipe(logFile);
+    heavyServerProcess.stderr.pipe(logFile);
+
+    heavyServerProcess.on('close', (code, signal) => {
+        console.log(`${C.magenta}⚠️  Heavy LLM Server exited (code=${code}, signal=${signal})${C.reset}`);
+        heavyServerProcess = null;
+        heavyServerModel = null;
+    });
+
+    heavyServerModel = model;
 }
 
 /**
@@ -254,10 +302,36 @@ async function killPort(port) {
 }
 
 /**
- * Kill any process using the LLAMA_PORT
+ * Kill any process using the LLAMA_PORT (Fix 4: strengthened with process tree kill)
  */
 async function killServer() {
+    // 1. Kill by port (existing behavior)
     await killPort(LLAMA_PORT);
+
+    // 2. Kill by process group (catches child workers)
+    if (serverProcess && serverProcess.pid) {
+        try {
+            process.kill(-serverProcess.pid, 'SIGKILL');
+            console.log(`${C.red}💀 Killed MLX process group: -${serverProcess.pid}${C.reset}`);
+        } catch (e) { /* already dead */ }
+        serverProcess = null;
+    }
+
+    // 3. Sweep any surviving MLX/Uvicorn processes by name
+    try { execSync('pkill -9 -f "mlx_vlm.server"'); } catch (e) {}
+    try { execSync('pkill -9 -f "mlx_lm"'); } catch (e) {}
+    try { execSync('pkill -9 -f "uvicorn.*18888"'); } catch (e) {}
+
+    // 4. Wait for OS to release port (increased from 1s)
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // 5. Cleanup heavy server as well on full shutdown
+    if (heavyServerProcess) {
+        await killPort(HEAVY_PORT);
+        if (heavyServerProcess.pid) {
+            try { process.kill(-heavyServerProcess.pid, 'SIGKILL'); } catch (e) {}
+        }
+    }
 }
 
 /**
@@ -327,7 +401,7 @@ async function main() {
     // 1. Initial Health Check
     let availableModels = await getLoadedModels();
     const isCli = process.argv.includes('--cli');
-    const DEFAULT_MODEL = process.env.LLM_MODEL || 'mlx-community/Qwen3.5-9B-Instruct-4bit';
+    const DEFAULT_MODEL = process.env.LLM_MODEL || 'mlx-community/Qwen3.5-2B-4bit';
 
     // Retry once if availableModels is empty (server might be warming up)
     if (availableModels.length === 0) {
@@ -354,7 +428,7 @@ async function main() {
         process.stdout.write(`${C.dim}Waiting for server to be ready...${C.reset}`);
         let healthy = false;
         let attempts = 0;
-        const maxAttempts = DEFAULT_MODEL.toLowerCase().includes('vl') ? 180 : 120; // Vision models load slower
+        const maxAttempts = (DEFAULT_MODEL.toLowerCase().includes('vl') || DEFAULT_MODEL.toLowerCase().includes('9b') || DEFAULT_MODEL.toLowerCase().includes('14b')) ? 300 : 120; // 300s for heavy/VL models
         while (!healthy && attempts < maxAttempts) {
             await new Promise(r => setTimeout(r, 1000));
             healthy = await checkServerHealth();
@@ -372,7 +446,10 @@ async function main() {
     console.log(`${C.green}✅ Llama Server is online on port ${LLAMA_PORT}${C.reset}`);
 
     // Activity tracking for idle unload
-    const IDLE_TIMEOUT = process.env.IDLE_UNLOAD_MINUTES ? (parseInt(process.env.IDLE_UNLOAD_MINUTES) * 60000) : 900000; // Default 15 mins
+    const minutesEnv = process.env.IDLE_UNLOAD_MINUTES;
+    const IDLE_TIMEOUT = (minutesEnv !== undefined && parseInt(minutesEnv) === 0) 
+        ? Infinity 
+        : (minutesEnv ? parseInt(minutesEnv) * 60000 : 900000); // Default 15 mins
     let lastActivityTime = Date.now();
 
     // 2. Start the Interface (Web or CLI)
@@ -388,6 +465,20 @@ async function main() {
 
         proc.on('message', async (msg) => {
             lastActivityTime = Date.now();
+            // Memory management for 2B server based on UI process messages
+            const freeMB = getFreeMemMB();
+            if (freeMB < 3000 && serverProcess && !isRestarting) {
+                console.error(`${C.red}⚠️  LOW MEMORY DETECTED (${freeMB}MB). Offloading 2B Llama Server to free resources.${C.reset}`);
+                await killServer(); // Ensure killServer is awaited
+                broadcastState('offloaded');
+                logGepEvent('memory_offload', 'LOW_RAM_UI_MSG', { free_mb: freeMB, action: 'offload_2b' });
+                return; // Stop processing other messages if offloading
+            } else if (freeMB > 6000 && !serverProcess && !isRestarting) {
+                console.log(`${C.green}✅ Memory recovered (${freeMB}MB). Relaunching 2B Llama Server.${C.reset}`);
+                startLlamaServer(process.env.LLM_MODEL || 'mlx-community/Qwen3.5-2B-MLX-4bit');
+                return; // Stop processing other messages if relaunching
+            }
+
             if (msg.type === 'SHUTDOWN') {
                 console.log(`\n${C.yellow}🔄 Manager: Received manual shutdown request from CLI.${C.reset}`);
                 await cleanup();
@@ -399,6 +490,17 @@ async function main() {
                 await killServer();
                 broadcastState('offline');
                 return;
+            }
+
+            if (msg.type === 'START_HEAVY_SERVER') {
+                if (!heavyServerProcess) {
+                    startHeavyServer(msg.model);
+                } else if (heavyServerModel !== msg.model) {
+                    console.log(`${C.magenta}🔄 Swapping heavy server model to: ${msg.model}${C.reset}`);
+                    killPort(HEAVY_PORT).then(() => {
+                        startHeavyServer(msg.model);
+                    });
+                }
             }
             if (msg.type === 'RESTART_LLAMA') {
                 if (isRestarting && !msg.forceClean) return;
@@ -417,6 +519,25 @@ async function main() {
                     
                     broadcastState('spawning', msg.model);
                     await killServer();
+
+                    // Fix 5: Verify port is free before spawning new server
+                    let portFree = false;
+                    for (let i = 0; i < 10; i++) {
+                        try {
+                            execSync(`lsof -ti:${LLAMA_PORT} -sTCP:LISTEN`);
+                            console.log(`${C.dim}Port ${LLAMA_PORT} still occupied, waiting... (${i+1}/10)${C.reset}`);
+                            await new Promise(r => setTimeout(r, 500));
+                        } catch (e) {
+                            portFree = true;
+                            break;
+                        }
+                    }
+                    if (!portFree) {
+                        console.error(`${C.red}⚠️ Port still occupied after kill. Force-killing all.${C.reset}`);
+                        try { execSync(`kill -9 $(lsof -ti:${LLAMA_PORT})`); } catch (e) {}
+                        await new Promise(r => setTimeout(r, 1000));
+                    }
+
                     startLlamaServer(msg.model);
                     
                     const checkHealthy = async () => {
@@ -485,9 +606,25 @@ async function main() {
     // 3. Periodic Health Watchdog
     let lastHealthyTime = Date.now();
     setInterval(async () => {
-        const healthy = await checkServerHealth();
-        
-        if (healthy) {
+        const isHealthy = await checkServerHealth();
+    const freeMB = getFreeMemMB();
+
+    // 1. Memory Pressure Offload (below 3GB)
+    if (freeMB < 3000 && serverProcess && !isRestarting) {
+        console.log(`${C.red}⚠️  CRITICAL MEMORY: ${freeMB}MB free. Offloading 2B server to prevent system swap.${C.reset}`);
+        broadcastState('offloaded');
+        await killServer();
+        // Log event for audit
+        logGepEvent('memory_offload', 'LOW_RAM', { free_mb: freeMB, action: 'offload_2b' });
+    }
+
+    // 2. Memory Recovery Auto-Start (above 6GB)
+    if (freeMB > 6000 && !serverProcess && !isRestarting) {
+        console.log(`${C.green}✅ MEMORY RECOVERED: ${freeMB}MB free. Resuming 2B server.${C.reset}`);
+        startLlamaServer();
+    }
+
+    if (isHealthy) {
             lastHealthyTime = Date.now();
             if (currentMlxState !== 'online') {
                 broadcastState('online');

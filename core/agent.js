@@ -62,12 +62,13 @@ const PLAN_CONTEXT_PATH = path.join(__dirname, '.plan_context.json');
 import { EventEmitter } from 'events';
 
 export const ROLE_MODEL_MAP = {
-    'team-architect': { modelId: process.env.LLM_MODEL_REASONER || process.env.LLM_MODEL, forceLocal: true, maxTokens: 4096 },
-    'team-coder': { modelId: process.env.LLM_MODEL_CODER || process.env.LLM_MODEL, forceLocal: true, maxTokens: 4096 },
-    'team-designer': { modelId: process.env.LLM_MODEL_REASONER || process.env.LLM_MODEL, forceLocal: true, maxTokens: 4096 },
-    'team-qa': { modelId: process.env.LLM_MODEL_CODER || process.env.LLM_MODEL, forceLocal: true, maxTokens: 4096 },
-    'team-researcher': { modelId: process.env.LLM_MODEL_REASONER || process.env.LLM_MODEL, forceLocal: true, maxTokens: 4096 },
-    'team-manager': { modelId: process.env.LLM_MODEL_MANAGER || process.env.LLM_MODEL, forceLocal: true, deepThinking: true, maxTokens: 4096 }
+    'team-architect': { modelId: process.env.LLM_MODEL_HEAVY || process.env.LLM_MODEL, forceLocal: true, maxTokens: 4096 },
+    'team-coder': { modelId: process.env.LLM_MODEL_HEAVY || process.env.LLM_MODEL, forceLocal: true, maxTokens: 4096 },
+    'team-designer': { modelId: process.env.LLM_MODEL_HEAVY || process.env.LLM_MODEL, forceLocal: true, maxTokens: 4096 },
+    'team-qa': { modelId: process.env.LLM_MODEL_HEAVY || process.env.LLM_MODEL, forceLocal: true, maxTokens: 4096 },
+    'team-researcher': { modelId: process.env.LLM_MODEL_HEAVY || process.env.LLM_MODEL, forceLocal: true, maxTokens: 4096 },
+    'team-manager': { modelId: process.env.LLM_MODEL_HEAVY || process.env.LLM_MODEL, forceLocal: true, deepThinking: true, maxTokens: 4096 },
+    'team-assistant': { modelId: process.env.LLM_MODEL, forceLocal: true, fast: true, maxTokens: 4096 }
 };
 
 export class Agent extends EventEmitter {
@@ -400,9 +401,9 @@ export class Agent extends EventEmitter {
         // Filter out disabled skills
         const detectedSkills = rawDetectedSkills.filter(s => !this.disabledSkills.has(s));
 
-        // Autonomous Escalation: If we detect a loop (repeats >= 3), force escalate to 9B
-        if (debug && debug.loops >= 3 && process.env.LLM_MODEL_9B && process.env.LLM_MODEL !== process.env.LLM_MODEL_9B) {
-            console.log(`\n🚀 [AUTO-ESCALATION] Intent loop detected. Promoting session to 9B reasoning model.`);
+        // Autonomous Escalation: If we detect a loop (repeats >= 3), force escalate to heavy model
+        if (debug && debug.loops >= 3 && process.env.LLM_MODEL_HEAVY && process.env.LLM_MODEL !== process.env.LLM_MODEL_HEAVY) {
+            console.log(`\n🚀 [AUTO-ESCALATION] Intent loop detected. Promoting session to heavy reasoning model.`);
             this.loopEscalationActive = true; 
         } else {
             this.loopEscalationActive = false;
@@ -414,7 +415,7 @@ export class Agent extends EventEmitter {
 
         // GEP Gene: Persistent Base Skills for Team Roles
         if (this.activeMode.startsWith('team-')) {
-            const baseSkills = ['terminal', 'self-coder', 'sys-admin'];
+            const baseSkills = ['terminal', 'self-coder', 'sys-admin', 'gmail', 'search'];
             baseSkills.forEach(s => {
                 if (!detectedSkills.includes(s) && this.skills.has(s)) {
                     detectedSkills.push(s);
@@ -493,12 +494,44 @@ export class Agent extends EventEmitter {
             let sanitizationMetadata = { raw: '', strips: [] };
             // Detect Deep Thinking Command
             let deepThinking = false;
-            let cleanMessage = userMessage;
+            let assistantText = '';
+            let isSimpleGreeting = false;
+            let isUtility = false;
+            const startTime = Date.now();
+            let cleanMessage = userMessage; // Renamed from 'Message' to 'cleanMessage' to match existing usage
+            
+            const ASSISTANT_SKILLS = ['gmail', 'weather', 'web-search', 'obsidian', 'knowledge-base', 'terminal'];
+            const UTILITY_KEYWORDS = ['email', 'search', 'email', ...ASSISTANT_SKILLS];
+
+            // Phase 48: Explicit Persona Routing (Global Override)
+            const lowerMsg = userMessage.toLowerCase().trim();
+            if (lowerMsg.startsWith('niki')) {
+                console.log(`🧠 [ROUTING] Explicit Niki prefix detected. Switching to 'team-manager' mode.`);
+                this.setMode('team-manager');
+                cleanMessage = userMessage.replace(/^niki[,:\s]*/i, '').trim();
+            } else if (lowerMsg.startsWith('devon')) {
+                console.log(`🧠 [ROUTING] Explicit Devon prefix detected. Switching to 'team-coder' mode.`);
+                this.setMode('team-coder');
+                cleanMessage = userMessage.replace(/^devon[,:\s]*/i, '').trim();
+            } else if (this.activeMode === 'primary') {
+                // Default to Devon (team-coder) if in primary mode and no prefix
+                console.log(`🧠 [ROUTING] No prefix detected in primary mode. Defaulting to 'team-coder' (Devon).`);
+                this.setMode('team-coder');
+            }
+
+            // Phase 49: Utility Routing Override (Bypass Niki for Assistant tasks)
+            const isUtilityRequest = UTILITY_KEYWORDS.some(skill => lowerMsg.includes(skill));
+            
+            if (isUtilityRequest && this.activeMode === 'team-manager' && !lowerMsg.startsWith('niki')) {
+                console.log(`🧠 [ROUTING] Utility request detected ("${lowerMsg}"). Overriding Niki to Devon.`);
+                this.setMode('team-coder');
+            }
+
             const isPrivate = this.isPrivateRequest(cleanMessage) || !!this.activeNotebook;
 
-            if (userMessage.startsWith('/think ')) {
+            if (cleanMessage.startsWith('/think ')) {
                 deepThinking = true;
-                cleanMessage = userMessage.replace('/think ', '');
+                cleanMessage = cleanMessage.replace('/think ', '');
                 console.log('🧠 Deep Thinking mode activated for this request.');
             }
 
@@ -511,16 +544,25 @@ export class Agent extends EventEmitter {
             const lowMem = freeMB < 500 && !disableCompressed;
             const ultraLowMem = freeMB < 200 && !disableCompressed;
 
-            const is9B = (process.env.LLM_MODEL || '').includes('9B') || (process.env.LLM_MODEL || '').toLowerCase().includes('nanbeige');
+            // Fix 9: Check the active role's model, not the env default
+            const activeRoleModel = ROLE_MODEL_MAP[this.activeMode]?.modelId || process.env.LLM_MODEL || '';
+            const is9B = activeRoleModel.includes('9B') || activeRoleModel.toLowerCase().includes('nanbeige');
             logDebug(`[DEBUG] Memory: ${freeMB}MB, LowMem: ${lowMem}, UltraLow: ${ultraLowMem}, is9B: ${is9B}`);
 
             // GREETING INTERCEPTOR (Stop 9B models from hallucinating tools for simple 'hi')
             const greetings = ['hi', 'hello', 'hey', 'greetings', 'reset'];
-            let isSimpleGreeting = greetings.includes(cleanMessage.toLowerCase());
+            isSimpleGreeting = greetings.includes(cleanMessage.toLowerCase());
+            
+            // Phase 5: Early Utility Detection for Routing & Pruning
+            isUtility = ['gmail', 'email', 'weather', 'search'].some(kw => lowerMsg.includes(kw));
 
-            // AUTO-MODE DETECTION
+            // Phase 50: Low-Latency Routing (Route simple greetings to 2B)
+            if (isSimpleGreeting && !deepThinking) {
+                console.log(`⚡ [ROUTING] Simple greeting detected. Will use Fast 2B model.`);
+            }
+
+            // AUTO-MODE DETECTION (Secondary check for keywords if in primary)
             if (this.activeMode === 'primary') {
-                const lowerMsg = cleanMessage.toLowerCase();
                 const teamKeywords = ['team', 'handoff', 'delegate', 'manager', 'niki', 'setup the team'];
                 const planKeywords = ['design', 'architect', 'plan', 'outline', 'architecture'];
                 const buildKeywords = ['write', 'implement', 'code', 'build', 'fix', 'script'];
@@ -538,30 +580,51 @@ export class Agent extends EventEmitter {
             }
 
             // CHAT MODE: Bypass dynamic tool injection entirely to save tokens and avoid tool hallucinations
-            // TEAM-MANAGER MODE: Only load management tools (strict delegation - Niki must not see execution tools)
+            // TEAM-MANAGER MODE & SUB-AGENTS: Load specific skills + Global Assistant Skills
             let dynamicTools;
+
+            // Phase 17: Resolve Dynamic Tools First
+            let detectionInjection = "";
+            if (!['chat', 'prompt-engineer'].includes(this.activeMode)) {
+                detectionInjection = await this.dynamicSkillInjection(cleanMessage);
+            }
+
             if (this.activeMode === 'chat') {
                 dynamicTools = "";
             } else if (this.activeMode === 'prompt-engineer') {
                 dynamicTools = "";
                 console.log('📝 [DRAFT MODE] Zero tools active. Prometheus is strictly meta-prompting.');
             } else if (this.activeMode === 'team-manager') {
-                dynamicTools = getToolDescriptionsForSkills(this.skills, ['team-manager', 'opencode', 'knowledge-base', 'terminal']);
-                console.log('🎯 [PM MODE] Tool isolation active. Niki can see management, opencode, knowledge, and terminal tools.');
+                dynamicTools = getToolDescriptionsForSkills(this.skills, ['team-manager', 'opencode', ...ASSISTANT_SKILLS]) + '\n' + detectionInjection;
+                console.log('🎯 [PM MODE] Tool isolation active. Niki can see management, opencode, and assistant tools + detected skills.');
             } else if (this.activeMode.startsWith('team-')) {
-                // Phase 17: Strict Tool Masking for Sub-Agents
-                const baseTools = getToolDescriptionsForSkills(this.skills, ['terminal', 'self-coder', 'sys-admin']);
-                const pmTools = getSpecificToolDescriptions(this.skills, ['handoff_to', 'escalate_to_9b']);
-                dynamicTools = baseTools + '\n' + pmTools;
-                console.log(`🎯 [SUB-AGENT MODE] Strict Tool Masking active for ${this.activeMode}. Bypassing intent mapper.`);
+                // Phase 17: Strict Tool Masking for Sub-Agents (Devon/Architect/etc)
+                const baseTools = getToolDescriptionsForSkills(this.skills, ['terminal', 'self-coder', 'sys-admin', ...ASSISTANT_SKILLS]);
+                
+                // DELEGATION RULE: Only Niki (team-manager) can delegate. Devon (team-coder) works directly.
+                if (this.activeMode === 'team-coder' || this.activeMode === 'team-qa') {
+                    console.log(`🎯 [DIRECT MODE] Removing delegation tools for ${this.activeMode}. Including detected skills.`);
+                    dynamicTools = baseTools + '\n' + detectionInjection;
+                } else {
+                    const pmTools = getSpecificToolDescriptions(this.skills, ['handoff_to', 'escalate_to_9b']);
+                    dynamicTools = baseTools + '\n' + pmTools + '\n' + detectionInjection;
+                    console.log(`🎯 [SUB-AGENT MODE] Expanded Tool Masking active for ${this.activeMode}. Including detected skills.`);
+                }
             } else {
-                dynamicTools = await this.dynamicSkillInjection(cleanMessage);
+                dynamicTools = detectionInjection;
             }
 
             // Phase 17: Build the base system prompt. Strip global skills for Sub-Agents to prevent pollution.
             let basePrompt = this.systemPrompt;
             if (this.activeMode.startsWith('team-') && this.activeMode !== 'team-manager') {
-                basePrompt = buildSystemPrompt("NO GLOBAL SKILLS AVAILABLE. You are restricted to the local tools provided below.");
+                basePrompt = buildSystemPrompt("You are operating in a specialized team role. You have FULL ACCESS to the tools listed below under 'AVAILABLE TOOLS' and you should use them proactively to fulfill the request.");
+            }
+            
+            // Inject Reasoning Prompt for 2B model
+            const is2B = this.activeMode === 'team-assistant' || (process.env.LLM_MODEL && process.env.LLM_MODEL.includes('2B'));
+            if (is2B && process.env.LLM_REASONING_PROMPT) {
+                console.log('🧠 Injecting optimized reasoning prompt for 2B model.');
+                basePrompt = `${process.env.LLM_REASONING_PROMPT}\n\n${basePrompt}`;
             }
 
             // Phase 18: Scored Memory Injection
@@ -574,6 +637,9 @@ export class Agent extends EventEmitter {
 
             let finalPrompt = `## 🧠 PROJECT CONTEXT: PROMETHEUS
 You are **PROMETHEUS**, a highly advanced agentic AI orchestrator. 
+- **WORKSPACE PATHS**:
+    - Project Root: ${process.env.PROJECT_ROOT || 'Not Set'}
+    - Documents Root (Vault): ${process.env.DOCUMENTS_ROOT || 'Not Set'}
 - **CRITICAL**: The current workspace IS the "Prometheus" project.
 - **DISCOVERY RULE**: For any query about a project (including "Prometheus"), you MUST first check:
     1. Your **Memory** (history).
@@ -588,7 +654,15 @@ You are **PROMETHEUS**, a highly advanced agentic AI orchestrator.
                 finalPrompt = "You are in CHAT mode. You are a helpful conversational assistant. Talk naturally with the user. You do NOT have access to tools or skills in this mode, so do not try to use any. Focus on providing high-quality text-based answers.\n\n" + finalPrompt;
             } else if (this.activeMode === 'team-manager') {
                 // Inject Priority Matrix Reinforcement for PM Mode
-                finalPrompt = `## 📊 TIERED PRIORITY MATRIX (PROMETHEUS)
+                const hasPlanKeywords = cleanMessage.toLowerCase().match(/\b(plan|list|steps|orchestrate)\b/);
+                const nikiPersona = hasPlanKeywords 
+                    ? "As Project Manager, your primary goal is to **LEAD THE TEAM**. Research the task, create a comprehensive plan using `save_plan`, and then `handoff_to` the appropriate Tier 1 or Tier 2 worker. **AUTONOMY**: Once the user approves a plan, proceed through ALL steps autonomously without further confirmation."
+                    : "As a Direct Executor, perform the requested task yourself using your available tools (Email, Weather, Search, etc.). Only delegate if the task becomes complex or requires coding.";
+
+                finalPrompt = `## 📊 NIKI'S ACTIVE PERSONA
+${nikiPersona}
+
+### TIERED PRIORITY MATRIX
 - **TIER 1 (OpenCode)**: DEFAULT for ALL Coding/Architecture/Maze logic. USE 'handoff_to_opencode'.
 - **TIER 2 (Devon)**: ONLY for Prometheus system maintenance, skill updates, or as a FAILOVER if Tier 1 fails. USE 'handoff_to'.
 - **TIER 3 (Niki)**: YOU are Tier 3. Audit results and manage the plan.
@@ -614,7 +688,18 @@ You are **PROMETHEUS**, a highly advanced agentic AI orchestrator.
             // Step 1: Stateful Memory Injection (PM_STATE.json)
             if (this.activeMode.startsWith('team-')) {
                 const roleName = this.activeMode.replace('team-', '');
-                const teamPrompt = this.getTeamRolePrompt(roleName);
+                let teamPrompt = this.getTeamRolePrompt(roleName);
+                
+                // Devon Specific Reinforcement
+                if (this.activeMode === 'team-coder') {
+                    teamPrompt = `## 👤 YOUR IDENTITY: DEVON
+You are **Devon**, Nelson Wong's direct personal assistant. 
+- **DIRECT ACTION**: You MUST perform all tasks yourself using your available tools.
+- **NO DELEGATION**: You are forbidden from delegating tasks to Niki or any other role.
+- **FAILURE PROTOCOL**: If you cannot complete a task due to errors, missing tools, or complexity, you MUST report this failure directly to Nelson Wong. do NOT try to handoff the problem to Niki. Nelson will decide how to proceed.
+- **NO HANDOFF**: When done (successfully or with a failure report), simply answer the user directly. Do not "wait for review".\n\n` + teamPrompt;
+                }
+                
                 finalPrompt = teamPrompt + '\n\n' + finalPrompt;
 
                 const PM_STATE_PATH = path.join(__dirname, '..', 'PM_STATE.json');
@@ -647,7 +732,7 @@ You are **PROMETHEUS**, a highly advanced agentic AI orchestrator.
                         finalPrompt += `\n\n## Handoff Context From Previous Agent\n${JSON.stringify(handoff, null, 2)}`;
 
                         // Auto-Return to PM Logic
-                        if (handoff.return_to && handoff.return_to === 'team-manager') {
+                        if (handoff.return_to && handoff.return_to === 'team-manager' && this.activeMode !== 'team-coder' && this.activeMode !== 'team-qa') {
                             finalPrompt += `\n\n> [!CRITICAL INSTRUCTION]\n> When you have completed your objective or encountered an unresolvable error, you MUST yield control back to the Project Manager.\n> **Action Required**: Use the \`handoff_to\` tool with \`role: "team-manager"\` and a \`context\` message detailing your result.\n`;
                         }
 
@@ -658,8 +743,12 @@ You are **PROMETHEUS**, a highly advanced agentic AI orchestrator.
                                 const timers = JSON.parse(fs.readFileSync(TIMER_PATH, 'utf-8'));
                                 const myTimer = timers[this.activeMode] || timers[this.activeMode.replace('team-', '')];
                                 if (myTimer && new Date().getTime() > myTimer.expires_at) {
-                                    console.log(`🛑 [SYSTEM INTERRUPT] Timer expired for ${this.activeMode}. Injecting forced handoff.`);
-                                    finalPrompt += `\n\n# 🛑 [SYSTEM URGENT INTERRUPT]\n> **YOUR TIME LIMIT HAS EXPIRED.**\n> You have been working for ${myTimer.timeout_ms / 60000} minutes and must now check in with the Project Manager.\n> **MANDATORY ACTION**: You MUST immediately call \`handoff_to\` with \`role: "team-manager"\` to report your current partial progress. Do NOT attempt any further tasks.\n`;
+                                    if (this.activeMode !== 'team-coder' && this.activeMode !== 'team-qa') {
+                                        console.log(`🛑 [SYSTEM INTERRUPT] Timer expired for ${this.activeMode}. Injecting forced handoff.`);
+                                        finalPrompt += `\n\n# 🛑 [SYSTEM URGENT INTERRUPT]\n> **YOUR TIME LIMIT HAS EXPIRED.**\n> You have been working for ${myTimer.timeout_ms / 60000} minutes and must now check in with the Project Manager.\n> **MANDATORY ACTION**: You MUST immediately call \`handoff_to\` with \`role: "team-manager"\` to report your current partial progress. Do NOT attempt any further tasks.\n`;
+                                    } else {
+                                        console.log(`🛑 [SYSTEM INTERRUPT] Timer expired for Devon, but suppressed for DIRECT MODE.`);
+                                    }
                                 }
                             } catch (e) { /* ignore */ }
                         }
@@ -680,29 +769,22 @@ Work just returned from ${handoff.from_role}. Before calling mark_step_done:
                     } catch (e) { /* ignore */ }
                 }
             }
-
-            if (ultraLowMem) {
-                console.log(`\n\x1b[31m🔴 ULTRA-LOW MEMORY (${freeMB}MB). Running in stateless fallback mode.\x1b[0m\n`);
-                finalPrompt = `You are Devon. Answer briefly. No tools available due to strict memory limits.`;
-                dynamicTools = "";
-            } else if (lowMem || is9B) {
-                logDebug('[DEBUG] Using optimized prompt for 3B/LowMem');
-                finalPrompt = finalPrompt + `\n\n## 📝 TASK INSTRUCTIONS (9B-Optimized)
+            
+            // Phase 4: Unified Tool Prompt for 2B/9B
+            if (!ultraLowMem) {
+                finalPrompt += `\n\n## 📝 TASK INSTRUCTIONS
 1. Always respond with text for simple talk (hi, hello, etc.).
 2. ONLY use tools if you see them listed below under "AVAILABLE TOOLS". If the list is empty, you cannot perform actions.
 3. Keep thinking <think> blocks under 10 words.
 4. To use a tool, you MUST output a valid JSON object in this exact format: {"tool": "tool_name", "args": {"param": "value"}}
 
 ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
-            }
-            else if (dynamicTools) {
-                finalPrompt += `\n\n## Dynamically Loaded Tools\nYou currently have FULL ACCESS to these specific tools because they seem relevant to the request:\n${dynamicTools}`;
-            } else {
-                finalPrompt += `\n\n## Tool Note\nYou only see skill SUMMARIES above to save memory. 
-If you need to use a skill but don't see its parameters, use the following special tool to see its full schema:
-\`\`\`json
-{"tool": "get_skill_details", "args": {"skill_name": "NAME"}}
-\`\`\``;
+
+                // Phase 4: Gmail Capability Pivot (Universal)
+                if (isPrivate && (lowerMsg.includes('email') || lowerMsg.includes('gmail'))) {
+                    console.log('📧 [GMAIL] Injecting UNIVERSAL MANDATORY ACTION for Gmail capability.');
+                    finalPrompt += `\n\n> [!MANDATORY ACTION]\n> You HAVE active access to Gmail via the "gmail" skill. Do NOT say you cannot check email. Use the "gmail_scan" tool immediately to fulfill the request.`;
+                }
             }
 
             // INJECT NOTEBOOK CONTEXT (only if not low memory)
@@ -725,9 +807,26 @@ If you need to use a skill but don't see its parameters, use the following speci
 
             // SPECIAL 9B PATCH: Strip "hallucinated" limitations from history to break failure loops
             cleanedHistory = cleanedHistory.filter(msg => {
-                if (msg.role === 'assistant' && (msg.content.includes("I cannot actually download") || msg.content.includes("don't have actual YouTube download capabilities"))) {
-                    console.log('🧹 [HALLUCINATION STRIP] Removed assistant denial from context-history.');
-                    return false;
+                if (msg.role !== 'assistant') return true;
+                
+                const denials = ["i cannot", "don't have", "do not have", "lack the capability"];
+                const contentLower = msg.content.toLowerCase();
+                
+                // If the assistant claims it can't do something that we KNOW it has a tool for, strip it.
+                if (denials.some(d => contentLower.includes(d))) {
+                    const toolList = Array.from(this.skills.values()).flatMap(s => s.toolNames);
+                    const skillList = Array.from(this.skills.keys());
+                    
+                    const isDenyingKnownTool = toolList.some(t => {
+                        const words = t.split('_');
+                        return words.some(w => w.length > 3 && contentLower.includes(w));
+                    });
+                    const isDenyingKnownSkill = skillList.some(s => contentLower.includes(s.toLowerCase()));
+                    
+                    if (isDenyingKnownTool || isDenyingKnownSkill || contentLower.includes("youtube") || contentLower.includes("gmail")) {
+                        console.log(`🧹 [HALLUCINATION STRIP] Removed assistant denial from context-history: "${msg.content.substring(0, 50)}..."`);
+                        return false;
+                    }
                 }
                 return true;
             });
@@ -736,17 +835,17 @@ If you need to use a skill but don't see its parameters, use the following speci
 
             // INJECT HISTORY (with pruning for simple greetings to avoid sticking to old instructions)
             const isGreeting = /^(hi|hello|hey|greetings|morning|afternoon|evening)(\s|$)/i.test(cleanMessage);
-            const isSmallModel = is9B || (process.env.LLM_MODEL || '').toLowerCase().includes('9b');
+            const isSmallModel = is9B;
 
             if (ultraLowMem) {
                 messages.push({ role: 'system', content: finalPrompt });
                 messages.push({ role: 'user', content: cleanMessage });
                 logDebug(`[DEBUG] History wiped for ultra-low memory stateless mode.`);
-            } else if (lowMem || isSmallModel || (isGreeting && isPrivate)) {
-                const historyLimit = isGreeting ? -4 : -10;
+            } else if (lowMem || isSmallModel || (isGreeting && isPrivate) || isUtility) {
+                const historyLimit = (isGreeting || isUtility) ? -4 : -10;
                 messages.push({ role: 'system', content: finalPrompt });
                 messages.push(...cleanedHistory.slice(historyLimit));
-                logDebug(`[DEBUG] History pruned for ${isGreeting ? 'greeting' : 'low-mem'} focus. Limit: ${historyLimit}`);
+                logDebug(`[DEBUG] History pruned for ${isUtility ? 'utility' : isGreeting ? 'greeting' : 'low-mem'} focus. Limit: ${historyLimit}`);
             } else {
                 messages.push({ role: 'system', content: finalPrompt });
                 messages.push(...cleanedHistory);
@@ -891,11 +990,14 @@ If you need to use a skill but don't see its parameters, use the following speci
             const chatOptions = {
                 forceLocal: isPrivate || !!this.activeNotebook,
                 deepThinking: forceDeepThinking,
-                maxTokens: ultraLowMem ? 512 : 2048,
+                fast: isSimpleGreeting && !deepThinking, // Fix 8: Route greetings to fast model
+                maxTokens: ultraLowMem ? 512 : 4096,
                 adapterPath: this.getAdapterPath(),
                 onToken: watchdogCallback,
                 signal: this.abortController.signal
             };
+
+            // (Logic moved below for precedence)
 
             if (ROLE_MODEL_MAP[this.activeMode]) {
                 const roleConfig = { ...ROLE_MODEL_MAP[this.activeMode] };
@@ -907,6 +1009,23 @@ If you need to use a skill but don't see its parameters, use the following speci
                     roleConfig.forceLocal = true;
                 }
                 Object.assign(chatOptions, roleConfig);
+            }
+
+            // Phase 5: Error-Driven Auto-Escalation & Utility Routing
+            const lastMsgContent = this.history.findLast(m => m.role === 'assistant')?.content || '';
+            const isErrorLoop = lastMsgContent.includes('"error":');
+
+            if (isUtility && !isErrorLoop && !deepThinking) {
+                console.log(`⚡ [ROUTING] Utility request detected. Forcing fast 2B model.`);
+                chatOptions.modelId = process.env.LLM_MODEL;
+                chatOptions.fast = true;
+                chatOptions.deepThinking = false;
+            } 
+            // Force 9B if there's an error to self-heal, or if explicitly asked/escalated
+            else if (isErrorLoop || deepThinking || this.loopEscalationActive) {
+                console.log(`🚀 [ROUTING] Escalating to heavy 9B model (reason: ${isErrorLoop ? 'Error' : deepThinking ? 'Explicit' : 'Loop'}).`);
+                chatOptions.modelId = process.env.LLM_MODEL_HEAVY;
+                chatOptions.deepThinking = true;
             }
 
             // Get LLM response
@@ -951,7 +1070,7 @@ If you need to use a skill but don't see its parameters, use the following speci
                 this.emit('usage', quotaTracker.getStats());
             }
 
-            let assistantText = response.text;
+            assistantText = response.text;
             const modelUsed = response.model;
             let finalTps = response.tps;
             let reasoning = response.reasoning || '';
@@ -1041,7 +1160,8 @@ If you need to use a skill but don't see its parameters, use the following speci
 
                 // 5. Empty Output Fallback (Prevents empty diamond in UI)
                 if (!final && reasoning) {
-                    return "My internal reasoning process is complete, but I have no additional verbal output. How can I assist you further?";
+                    const snippet = reasoning.length > 200 ? reasoning.substring(0, 197) + '...' : reasoning;
+                    return `### 🧠 Reasoning Fragment Found\n\nThe model completed its internal reasoning but did not produce a final verbal response. This usually happens if the task is extremely complex or reaches token limits.\n\n**Reasoning Snippet:**\n> ${snippet}\n\n*Would you like me to try summarizing this or continuing from where it left off?*`;
                 }
 
                 return final;
@@ -1198,6 +1318,8 @@ If you need to use a skill but don't see its parameters, use the following speci
 
                                 result = await Promise.race([
                                     executeTool(this.skills, toolCall.tool, toolCall.args, {
+                                        agent: this,
+                                        modelId: activeRoleModel,
                                         onStream: (chunk) => {
                                             this.emit('terminal_stream', chunk);
                                         }
@@ -1249,6 +1371,18 @@ If you need to use a skill but don't see its parameters, use the following speci
                                 // Append Error ID to the result so the agent knows about it
                                 result.error_id = errorId;
                                 result.system_note = `System logged error as ${errorId}. You should verify this error using read_file then fix it.`;
+                                
+                                // 🚀 9B Escalation on Fast-Override Error
+                                if (chatOptions.fast) {
+                                    const freeMem = os.freemem() / (1024 * 1024);
+                                    if (freeMem > 6000) {
+                                        console.log(`     🚀 [ESCALATION] Tool "${toolCall.tool}" returned error while on 2B. Escalating to 9B (${Math.round(freeMem)}MB free).`);
+                                        chatOptions.modelId = process.env.LLM_MODEL_HEAVY;
+                                        chatOptions.fast = false;
+                                    } else {
+                                        console.log(`     ⚠️ [ESCALATION BLOCKED] Insufficient RAM (${Math.round(freeMem)}MB). Staying on 2B.`);
+                                    }
+                                }
                             }
 
                             // Feed tool result back to LLM for natural response
@@ -1305,6 +1439,24 @@ If you need to use a skill but don't see its parameters, use the following speci
 
                             assistantText = cleanupAssistantText(followUp.text);
                             finalTps = followUp.tps;
+
+                            // Phase 6: Gmail Response Cleanup (Strip disclaimers if tool worked)
+                            if (isUtility && toolCall.tool.startsWith('gmail_') && !result.error) {
+                                const denials = [
+                                    "I cannot access your Gmail account",
+                                    "I do not have access to your email",
+                                    "I am an AI and cannot check emails",
+                                    "I can only perform tasks within the Prometheus project"
+                                ];
+                                denials.forEach(d => {
+                                    assistantText = assistantText.replace(new RegExp(d + ".*?[\\.\\!\\?]", "gi"), "");
+                                });
+                                assistantText = assistantText.trim();
+                                if (assistantText.length < 5) {
+                                    assistantText = `I processed the ${toolCall.tool.replace('_', ' ')} request. ` + 
+                                                    (result.count === 0 ? "I found 0 unread emails." : `I found ${result.count} unread emails.`);
+                                }
+                            }
                         }
                     } catch (e) {
                         // Error Logging Integration
@@ -1327,6 +1479,18 @@ If you need to use a skill but don't see its parameters, use the following speci
                             this.history.push({ role: 'user', content: errorMsg });
 
                             console.log(`     🔄 [AUTO-HEAL] Engaging diagnostic loop for ${errorId}...`);
+
+                            // 🚀 9B Escalation on Fast-Override Exception
+                            if (chatOptions.fast) {
+                                const freeMem = os.freemem() / (1024 * 1024);
+                                if (freeMem > 6000) {
+                                    console.log(`     🚀 [ESCALATION] Tool "${toolCall.tool}" threw error while on 2B. Escalating to 9B (${Math.round(freeMem)}MB free).`);
+                                    chatOptions.modelId = process.env.LLM_MODEL_HEAVY;
+                                    chatOptions.fast = false;
+                                } else {
+                                    console.log(`     ⚠️ [ESCALATION BLOCKED] Insufficient RAM (${Math.round(freeMem)}MB). Staying on 2B.`);
+                                }
+                            }
 
                             const followUp = await chat([
                                 { role: 'system', content: finalPrompt },

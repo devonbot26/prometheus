@@ -9,30 +9,29 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 console.log('🧪 Starting Role Routing Verification Test...\n');
 
 // 1. Check .env variables
-console.log('📋 Checking .env specialized models:');
-console.log(` - REASONER: ${process.env.LLM_MODEL_REASONER}`);
-console.log(` - CODER: ${process.env.LLM_MODEL_CODER}`);
-console.log(` - MANAGER: ${process.env.LLM_MODEL_MANAGER}`);
+console.log('📋 Checking .env model variables:');
+console.log(` - DEFAULT: ${process.env.LLM_MODEL}`);
+console.log(` - HEAVY: ${process.env.LLM_MODEL_HEAVY}`);
 
-if (!process.env.LLM_MODEL_REASONER || !process.env.LLM_MODEL_CODER || !process.env.LLM_MODEL_MANAGER) {
-    console.error('❌ Missing specialized model variables in .env');
+if (!process.env.LLM_MODEL || !process.env.LLM_MODEL_HEAVY) {
+    console.error('❌ Missing model variables in .env (LLM_MODEL and/or LLM_MODEL_HEAVY)');
     process.exit(1);
 }
 
 // 2. Verify ROLE_MODEL_MAP in agent.js
 console.log('\n🧠 Checking ROLE_MODEL_MAP in agent.js:');
-const rolesToTest = ['team-architect', 'team-coder', 'team-manager'];
+const rolesToTest = ['team-architect', 'team-coder', 'team-manager', 'team-assistant'];
 
 for (const role of rolesToTest) {
     const config = ROLE_MODEL_MAP[role];
     if (!config || !config.modelId) {
         console.error(`❌ Role ${role} is missing modelId in ROLE_MODEL_MAP`);
     } else {
-        console.log(` ✅ ${role} -> ${config.modelId}`);
+        console.log(` ✅ ${role} -> ${config.modelId} ${config.fast ? '(fast)' : ''} ${config.deepThinking ? '(deep)' : ''}`);
     }
 }
 
-// 3. Simulate a handoff logic check (Mental check vs code)
+// 3. Simulate a handoff logic check
 console.log('\n📡 Simulation: Handoff from team-manager to team-coder');
 const coderModel = ROLE_MODEL_MAP['team-coder'].modelId;
 const currentActive = process.env.LLM_MODEL;
