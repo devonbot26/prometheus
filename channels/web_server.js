@@ -62,6 +62,23 @@ await mcpManager.initialize();
 await projectIndexer.initialize();
 const agent = new Agent();
 let currentMlxState = 'offline'; 
+let cachedMemoryPressure = 1;
+
+// Background stats gathering to avoid blocking the event loop
+function updateSystemStats() {
+    if (os.platform() === 'darwin') {
+        import('child_process').then(({ exec }) => {
+            exec('sysctl -n kern.memorystatus_vm_pressure_level', (error, stdout) => {
+                if (!error && stdout) {
+                    cachedMemoryPressure = parseInt(stdout.trim()) || 1;
+                }
+            });
+        });
+    }
+}
+// Initial update and periodic refresh every 10 seconds
+updateSystemStats();
+setInterval(updateSystemStats, 10000);
 
 // Initial Health Check on boot to avoid missing supervisor signals
 import fetch from 'node-fetch';
@@ -134,17 +151,10 @@ app.get('/api/mcp/config', (req, res) => {
 });
 
 app.get('/api/system/stats', (req, res) => {
-    try {
-        const pressureOutput = execSync('sysctl -n kern.memorystatus_vm_pressure_level').toString().trim();
-        console.log(`📊 [WEB] System Stats Request - Pressure: ${pressureOutput}`);
-        res.json({
-            memoryPressure: parseInt(pressureOutput) || 1,
-            model: process.env.LLM_MODEL || 'default'
-        });
-    } catch (e) {
-        console.error('📊 [WEB] Stats Error:', e.message);
-        res.json({ memoryPressure: 1, model: 'unknown' });
-    }
+    res.json({
+        memoryPressure: cachedMemoryPressure,
+        model: process.env.LLM_MODEL || 'default'
+    });
 });
 
 app.post('/api/mcp/toggle', async (req, res) => {
@@ -201,447 +211,12 @@ async function sendWelcome(target = global.io) {
     }
 }
 
-// Handle Socket Connections
-io.on('connection', (socket) => {
-    console.log(`📡 [WEB] Socket connected: ${socket.id}`);
-
-    // Send initial boot sequence
-    socket.emit('clear_console');
-    socket.emit('status', 'System Initializing...');
-
-    // Native Action Result Forwarder (for macos-control skill)
-    // The skill emits via global.io (broadcast) but cannot listen on it.
-    // This forwards client responses to the global callback registry.
-    socket.on('native_action_result', (result) => {
-        if (global._nativeActionCallback) {
-            global._nativeActionCallback(result);
-            global._nativeActionCallback = null;
-        }
-    });
-    
-    // Boot Phase Simulation/Check
-    const bootPhases = [
-        { phase: 1, msg: '🔗 Bridge Link Established', delay: 100 },
-        { phase: 2, msg: '📡 Supervisor Sync Complete', delay: 400 },
-        { phase: 3, msg: '🧠 Verifying Brain Readiness...', delay: 800 }
-    ];
-
-    bootPhases.forEach((p, i) => {
-        setTimeout(() => {
-            socket.emit('log', p.msg);
-            if (p.phase === 3) {
-                if (currentMlxState === 'online') {
-                    socket.emit('log', '✅ MLX Server Ready');
-                    socket.emit('log', '📥 Restoring Project Context...');
-                    setTimeout(() => sendWelcome(socket), 500);
-                } else {
-                    socket.emit('log', '💤 Brain is sleeping (Cold start may be required)');
-                    socket.emit('status', 'Idle');
-                }
-            }
-        }, p.delay);
-    });
-
-    // Send stats, history (delayed), and model on connection
-    socket.emit('usage', agent.quotaTracker.getStats());
-    // Initial state sync
-    socket.emit('model_info', process.env.LLM_MODEL || 'default');
-    socket.emit('mlx_status', { state: currentMlxState, model: process.env.LLM_MODEL });
-    socket.emit('config_info', userConfig);
-    broadcastSkills(socket);
-    broadcastKnowledge(socket);
-    broadcastMemories(socket);
-    broadcastTeamInfo(socket);
-    broadcastContext(socket);
-    
-    // Lazy history load
-    setTimeout(() => {
-        socket.emit('history', agent.history);
-    }, 1500);
-
-    // GEP Gene: Auto-Resume Project Loop for Web
-    const pmStatePath = path.resolve(process.cwd(), 'PM_STATE.json');
-    if (agent.activeMode === 'primary' && fs.existsSync(pmStatePath) && requestQueue.length === 0 && !isProcessingQueue) {
-        try {
-            const stateText = fs.readFileSync(pmStatePath, 'utf8').trim();
-            if (stateText) {
-                const state = JSON.parse(stateText);
-                const pending = (state.steps || []).some(s => s.status === 'pending');
-                if (pending) {
-                    // Check if already in queue to prevent double-nudge
-                    const alreadyQueued = requestQueue.some(r => r.text === 'get_next_step');
-                    if (!alreadyQueued) {
-                        if (process.send) process.send({ type: 'ACTIVITY' });
-                    console.log(`\n🤖 [WEB AUTO-RESUME] Project plan detected. Nudging Niki...\n`);
-                        setTimeout(() => {
-                            if (isProcessingQueue) return; // Final guard
-                            agent.setMode('team-manager');
-                            socket.emit('status', 'Resuming Project...');
-                            requestQueue.push({ 
-                                text: 'get_next_step', 
-                                resolve: () => {}, 
-                                reject: () => {} 
-                            });
-                            processQueue();
-                        }, 1000);
-                    }
-                }
-            }
-
-        } catch (e) { /* ignore */ }
-    }
-
-    const processQueue = async (autoStep = 0) => {
-        if (isProcessingQueue || requestQueue.length === 0) return;
-        isProcessingQueue = true;
-
-        const { text, draftMode, resolve, reject } = requestQueue.shift();
-
-        try {
-            socket.emit('status', 'Thinking...');
-            
-            const result = await (async () => {
-                const heartbeatInterval = setInterval(sendHeartbeat, 30000);
-                const originalMode = agent.activeMode;
-                try {
-                    if (draftMode) {
-                        agent.setMode('prompt-engineer');
-                    }
-                    return await agent.process(text, undefined, (chunk, isReasoning) => {
-                        if (isReasoning && agent.showThinking) {
-                            socket.emit('think_stream', chunk);
-                        }
-                    });
-                } finally {
-                    clearInterval(heartbeatInterval);
-                    if (draftMode) {
-                        agent.setMode(originalMode);
-                    }
-                }
-            })();
-
-            // Handle Auto-Continue Relay (Agent-to-Agent)
-            if (result.auto_continue && autoStep < 10) {
-                const handoffPath = path.resolve(process.cwd(), 'HANDOFF.json');
-                if (fs.existsSync(handoffPath)) {
-                    const handoff = JSON.parse(fs.readFileSync(handoffPath, 'utf-8'));
-                    const wakeUp = handoff.context;
-                    const targetRole = handoff.to;
-
-                    const roleConfig = ROLE_MODEL_MAP[targetRole] || ROLE_MODEL_MAP[`team-${targetRole}`];
-                    const activeModel = process.env.LLM_MODEL || "";
-                    
-                    if (roleConfig && roleConfig.modelId && roleConfig.modelId !== activeModel) {
-                        socket.emit('status', `Swapping brain for ${targetRole}...`);
-                        if (process.send) {
-                            process.send({ type: 'RESTART_LLAMA', model: roleConfig.modelId });
-                            await new Promise((resolveWait) => {
-                                const timeout = setTimeout(resolveWait, 60000);
-                                const handler = (m) => {
-                                    if (m.type === 'MODEL_UPDATED' && m.model === roleConfig.modelId) {
-                                        clearTimeout(timeout);
-                                        process.removeListener('message', handler);
-                                        resolveWait();
-                                    }
-                                };
-                                process.on('message', handler);
-                            });
-                        }
-                    }
-
-                    agent.setMode(handoff.to);
-                    isProcessingQueue = false; // Release for recursion
-                    requestQueue.unshift({ text: wakeUp, resolve, reject });
-                    return processQueue(autoStep + 1);
-                }
-            }
-
-            resolve(result);
-        } catch (e) {
-            reject(e);
-        } finally {
-            isProcessingQueue = false;
-            socket.emit('status', requestQueue.length > 0 ? `Queued (${requestQueue.length} pending)...` : 'Idle');
-            processQueue(); 
-        }
-    };
-
-    socket.on('mlx_control', (data) => {
-        const action = typeof data === 'string' ? data : data.action;
-        const model = typeof data === 'object' ? data.model : null;
-        
-        console.log(`🕹️ [WEB] Manual MLX Control: ${action} ${model || ''}`);
-        
-        if (process.send) {
-            let type = 'RESTART_LLAMA';
-            if (action === 'stop') type = 'STOP_LLAMA';
-            
-            process.send({ 
-                type, 
-                model: model || process.env.LLM_MODEL,
-                forceClean: true 
-            });
-        }
-    });
-
-    // Fix 1: Zombie process cleanup handler
-    socket.on('fix_zombies', async () => {
-        console.log('🧹 [WEB] fix_zombies triggered. Killing orphan processes...');
-        socket.emit('log', '🧹 Cleaning up zombie processes...');
-        
-        try {
-            // Kill all MLX server processes by name
-            try { execSync('pkill -9 -f "mlx_vlm.server"'); } catch (e) {}
-            try { execSync('pkill -9 -f "mlx_lm"'); } catch (e) {}
-            try { execSync('pkill -9 -f "uvicorn"'); } catch (e) {}
-            
-            // Kill anything on the MLX port
-            try {
-                const pids = execSync('lsof -ti:18888').toString().trim();
-                if (pids) execSync(`kill -9 ${pids.split('\n').join(' ')}`);
-            } catch (e) {}
-            
-            // Signal supervisor to restart cleanly
-            if (process.send && process.connected) {
-                process.send({ type: 'RESTART_LLAMA', model: process.env.LLM_MODEL, forceClean: true });
-            }
-            
-            socket.emit('log', '✅ Zombie cleanup complete. Server restarting...');
-            socket.emit('message', { role: 'assistant', content: '🧹 Zombie processes cleared. MLX server is restarting.' });
-        } catch (e) {
-            socket.emit('log', `❌ Cleanup error: ${e.message}`);
-        }
-    });
-
-    // Fix 2: Abort agent work when clients disconnect (prevents orphaned processing)
-    socket.on('disconnect', (reason) => {
-        console.log(`🔌 [WEB] Client disconnected: ${reason}`);
-        if (agent.processing && agent.abortController) {
-            console.log('🛑 [WEB] Aborting in-progress agent task due to client disconnect.');
-            agent.abortController.abort();
-        }
-        requestQueue.length = 0; // Clear any pending requests for this socket
-    });
-
-    // Handle incoming messages from UI
-    socket.on('message', async (data) => {
-        sendHeartbeat();
-        const text = typeof data === 'string' ? data : data.text;
-        const draftMode = typeof data === 'object' ? data.draftMode : false;
-
-        if (text.startsWith('/')) {
-            const args = text.split(' ');
-            const cmd = args[0].toLowerCase();
-            if (cmd === '/model') {
-                const arg = args[1];
-                console.log(`\n🧠 [WEB] Model change requested: ${arg || 'list'}\n`);
-                const MODEL_ID_MAP = {
-                    '1': 'mlx-community/DeepSeek-R1-Distill-Qwen-14B-abliterated-v2-Q4-mlx',
-                    '2': 'mlx-community/Qwen2.5-Coder-14B-4bit',
-                    '3': 'Jackrong/MLX-Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-4bit',
-                    '4': '/Users/nelsonwong/Documents/projects/Prometheus/models/Qwen3.5-9B-Claude-Abliterated-mxfp4',
-                    '5': 'mlx-community/Qwen3.5-2B-MLX-4bit',
-                    '2b': 'mlx-community/Qwen3.5-2B-MLX-4bit'
-                };
-                const modelId = MODEL_ID_MAP[arg] || arg;
-                if (!modelId) {
-                    socket.emit('message', { role: 'assistant', content: `🧠 Usage: /model [id|name]\nPresets: 1(DeepSeek), 2(Coder), 3(Qwen9B), 4(MXFP4-9B), 5(Qwen2B)` });
-                    return;
-                }
-                if (process.send) {
-                    console.log(`📡 [WEB] Sending RESTART_LLAMA IPC sync for ${modelId}`);
-                    process.send({ type: 'RESTART_LLAMA', model: modelId });
-                    socket.emit('message', { role: 'assistant', content: `🔄 Switching model to: **${modelId}**... The server will restart. Please wait ~30s.` });
-                } else {
-                    console.error(`❌ [WEB] process.send is missing! Cannot signal supervisor.`);
-                    socket.emit('message', { role: 'assistant', content: `❌ Supervisor not detected. Cannot switch models via web UI.` });
-                }
-                return;
-            }
-        }
-
-        if (requestQueue.length >= MAX_QUEUE_SIZE) {
-            socket.emit('message', { role: 'assistant', content: `⚠️ Queue is full (${MAX_QUEUE_SIZE}). Please wait before sending more prompts.` });
-            return;
-        }
-
-        return new Promise((resolve, reject) => {
-            requestQueue.push({ text, draftMode, resolve, reject });
-            
-            if (isProcessingQueue) {
-                socket.emit('status', `Queued (${requestQueue.length} pending)...`);
-            } else {
-                processQueue();
-            }
-        }).catch(async (e) => {
-            if (e.message !== "ABORTED_BY_USER") {
-                // Cold Start Detection: If model is unloaded, wake it up and retry
-                if (e.message.includes('fetch failed') || e.message.includes('ECONNREFUSED')) {
-                    socket.emit('status', '🔌 Model is sleeping. Waking up...');
-                    socket.emit('log', '💤 Cold start detected. Sending wake-up signal to Llama Server...');
-                    
-                    if (process.send && process.connected) {
-                        try { process.send({ type: 'RESTART_LLAMA' }); } catch(err) {}
-                    }
-
-                    // Re-queue the message for retry after 20s
-                    setTimeout(() => {
-                        socket.emit('status', 'Retrying...');
-                        requestQueue.unshift({ text, resolve, reject });
-                        processQueue();
-                    }, 20000);
-                    return;
-                }
-
-                socket.emit('status', 'Error');
-                socket.emit('message', { role: 'assistant', content: `⚠️ Error: ${e.message}` });
-            }
-        });
-
-    });
-
-    // Handle cancellation from UI
-    socket.on('stop', () => {
-        console.log('🛑 UI requested stop. Clearing queue and halting agent...');
-        requestQueue.length = 0; // Clear the queue
-        agent.stop();
-        socket.emit('status', 'Interrupted');
-    });
-
-    socket.on('skill_toggle', (data) => {
-        const { name, enabled } = data;
-        const skill = agent.skills.get(name); // Use .get() for Map
-        if (skill) {
-            agent.toggleSkill(name, enabled); // Use agent's method to update internal state
-            console.log(`🔌 [WEB] Skill ${name} ${enabled ? 'ENABLED' : 'DISABLED'}`);
-            broadcastSkills();
-        }
-    });
-
-    socket.on('update_config', (newConfig) => {
-        console.log('⚙️ [WEB] Syncing global configuration:', newConfig);
-        userConfig = { ...userConfig, ...newConfig };
-        
-        if (newConfig.PROJECT_ROOT) process.env.PROJECT_ROOT = newConfig.PROJECT_ROOT;
-        if (newConfig.DOCUMENTS_ROOT) process.env.DOCUMENTS_ROOT = newConfig.DOCUMENTS_ROOT;
-        
-        fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(userConfig, null, 2));
-        io.emit('config_info', userConfig);
-    });
- 
-    // Manual Refresh Requests
-    socket.on('refresh_resources', async () => {
-        broadcastSkills(socket);
-        broadcastKnowledge(socket);
-        broadcastMemories(socket);
-        broadcastTeamInfo(socket);
-        await broadcastContext();
-    });
-
-    socket.on('update_role_prompt', async (data) => {
-        const { name, prompt } = data;
-        try {
-            const promptsDir = path.join(process.cwd(), 'prompts');
-            const filePath = path.join(promptsDir, `${name}.md`);
-            if (fs.existsSync(filePath)) {
-                fs.writeFileSync(filePath, prompt, 'utf-8');
-                console.log(`🎭 [WEB] Persona for ${name} updated by user.`);
-                socket.emit('log', `✅ Persona for **${name}** updated and persisted.`);
-                // Re-broadcast to all to sync UI
-                broadcastTeamInfo();
-            } else {
-                socket.emit('log', `⚠️ Role file not found: ${name}.md`);
-            }
-        } catch (e) {
-            console.error('Error updating role prompt:', e);
-            socket.emit('log', `❌ Failed to update persona: ${e.message}`);
-        }
-    });
- 
-    // --- CONTEXT HUB ENDPOINTS ---
-
-    /**
-     * Helper to broadcast the latest state to all connected clients
-     */
-    /**
-     * Helper to broadcast the latest state to all connected clients
-     */
-    async function broadcastContext(targetSocket = null) {
-        try {
-            const historyPath = path.join(process.cwd(), 'core', 'history.json');
-            let history = [];
-            if (fs.existsSync(historyPath)) {
-                history = JSON.parse(fs.readFileSync(historyPath, 'utf-8'));
-            }
-            const pmStatePath = path.join(process.cwd(), 'PM_STATE.json');
-            let pmState = null;
-            if (fs.existsSync(pmStatePath)) {
-                pmState = JSON.parse(fs.readFileSync(pmStatePath, 'utf-8'));
-            }
- 
-            // Load user priorities for decision tree visualization
-            let userPriorities = {};
-            try {
-                const priorityPath = path.join(process.cwd(), 'config', 'user_priority.json');
-                if (fs.existsSync(priorityPath)) {
-                    userPriorities = JSON.parse(fs.readFileSync(priorityPath, 'utf-8'));
-                }
-            } catch (e) {}
-
-            const data = {
-                mode: agent.activeMode,
-                systemPrompt: agent.systemPrompt,
-                history: history,
-                pmState: pmState,
-                intentSchema: INTENT_SCHEMA,
-                userPriorities: userPriorities
-            };
-
-            if (targetSocket) {
-                targetSocket.emit('context_data', data);
-            } else {
-                io.emit('context_data', data);
-            }
-        } catch (e) {
-            console.error('Error broadcasting context:', e);
-        }
-    }
-
-    socket.on('request_context', async () => {
-        await broadcastContext();
-    });
-
-    socket.on('update_history', async (newHistory) => {
-        try {
-            const historyPath = path.join(process.cwd(), 'core', 'history.json');
-            fs.writeFileSync(historyPath, JSON.stringify(newHistory, null, 2));
-            console.log(`🧠 [CONTEXT HUB] History trimmed and saved by user. New turn count: ${newHistory.length}`);
-            socket.emit('log', `✅ Brain State Saved. Retained ${newHistory.length} interaction turns.`);
-            
-            // Re-broadcast to sync all clients
-            await broadcastContext();
-        } catch (e) {
-            console.error('Error saving history:', e);
-            socket.emit('log', `⚠️ Failed to save brain state: ${e.message}`);
-        }
-    });
-
-    // Auto-refresh context when messages flow
-    // MOVED OUTSIDE connection handler to prevent duplicate listeners
-    // agent.on('message', (msg) => {
-    //     io.emit('message', msg);
-    //     // Refresh Hub implicitly after each assistant or user interaction to keep it live
-    //     broadcastContext();
-    // });
-
-});
-
 /**
  * Broadcasts available skills and their status to clients
  */
 function broadcastSkills(socket = null) {
     const skills = Array.from(agent.skills.values())
-        .filter(s => s.meta.name !== 'twitter-assistant') // Explicitly removed as requested
+        .filter(s => s.meta.name !== 'twitter-assistant')
         .map(s => ({
             name: s.meta.name,
             description: s.meta.description,
@@ -653,7 +228,7 @@ function broadcastSkills(socket = null) {
         target.emit('skills_info', skills);
     }
 }
- 
+
 /**
  * Broadcasts indexed projects (Knowledge Base)
  */
@@ -664,7 +239,7 @@ function broadcastKnowledge(socket = null) {
         target.emit('knowledge_info', projects);
     }
 }
- 
+
 /**
  * Broadcasts long-term memories
  */
@@ -701,31 +276,383 @@ function broadcastTeamInfo(socket = null) {
     }
 }
 
-// Bind Agent Events to Socket.io
-// Moved outside io.on('connection') to prevent duplicate listeners on reconnect
-agent.on('message', (msg) => {
-    io.emit('message', msg);
-    // Refresh Hub implicitly after each assistant or user interaction to keep it live
-    // Note: this function requires the io instance which is global.io
+/**
+ * Helper to broadcast the latest state to all connected clients
+ */
+async function broadcastContext(targetSocket = null) {
     try {
+        const historyPath = path.join(process.cwd(), 'core', 'history.json');
+        let history = [];
+        if (fs.existsSync(historyPath)) {
+            history = JSON.parse(fs.readFileSync(historyPath, 'utf-8'));
+        }
         const pmStatePath = path.join(process.cwd(), 'PM_STATE.json');
         let pmState = null;
         if (fs.existsSync(pmStatePath)) {
             pmState = JSON.parse(fs.readFileSync(pmStatePath, 'utf-8'));
         }
-        global.io.emit('context_data', {
-            mode: agent.activeMode,
-            pmState: pmState
-        });
+
+        // Load user priorities for decision tree visualization
+        let userPriorities = {};
+        try {
+            const priorityPath = path.join(process.cwd(), 'config', 'user_priority.json');
+            if (fs.existsSync(priorityPath)) {
+                userPriorities = JSON.parse(fs.readFileSync(priorityPath, 'utf-8'));
+            }
+        } catch (e) {}
+
+        const data = {
+            mode: agent.activeMode,       // Legacy / Web compatibility
+            activeMode: agent.activeMode, // Native Bridge compatibility
+            systemPrompt: agent.systemPrompt,
+            history: history,
+            pmState: pmState,
+            intentSchema: INTENT_SCHEMA,
+            userPriorities: userPriorities
+        };
+
+        const target = targetSocket || global.io;
+        if (target) {
+            target.emit('context_data', data);
+        }
     } catch (e) {
-        // Silent fail on context broadcast during message stream
+        console.error('Error broadcasting context:', e);
+    }
+}
+
+// Handle Socket Connections
+io.on('connection', (socket) => {
+    console.log(`📡 [WEB] Socket connected: ${socket.id}`);
+
+    // Send initial boot sequence
+    socket.emit('clear_console');
+    socket.emit('status', 'System Initializing...');
+
+    // Native Action Result Forwarder
+    socket.on('native_action_result', (result) => {
+        if (global._nativeActionCallback) {
+            global._nativeActionCallback(result);
+            global._nativeActionCallback = null;
+        }
+    });
+    
+    // Boot Phase Simulation/Check
+    const bootPhases = [
+        { phase: 1, msg: '🔗 Bridge Link Established', delay: 100 },
+        { phase: 2, msg: '📡 Supervisor Sync Complete', delay: 400 },
+        { phase: 3, msg: '🧠 Verifying Brain Readiness...', delay: 800 }
+    ];
+
+    bootPhases.forEach((p, i) => {
+        setTimeout(() => {
+            socket.emit('log', p.msg);
+            if (p.phase === 3) {
+                if (currentMlxState === 'online') {
+                    socket.emit('log', '✅ MLX Server Ready');
+                    socket.emit('log', '📥 Restoring Project Context...');
+                    setTimeout(() => sendWelcome(socket), 500);
+                } else {
+                    socket.emit('log', '💤 Brain is sleeping (Cold start may be required)');
+                    socket.emit('status', 'Idle');
+                }
+            }
+        }, p.delay);
+    });
+
+    // Send stats, history, and model on connection
+    socket.emit('usage', agent.quotaTracker.getStats());
+    socket.emit('model_info', process.env.LLM_MODEL || 'default');
+    socket.emit('mlx_status', { state: currentMlxState, model: process.env.LLM_MODEL });
+    socket.emit('config_info', userConfig);
+    broadcastSkills(socket);
+    broadcastKnowledge(socket);
+    broadcastMemories(socket);
+    broadcastTeamInfo(socket);
+    broadcastContext(socket);
+    
+    // Lazy history load
+    setTimeout(() => {
+        socket.emit('history', agent.history);
+    }, 1500);
+
+    // GEP Gene: Auto-Resume Project Loop for Web
+    const pmStatePath = path.resolve(process.cwd(), 'PM_STATE.json');
+    if (agent.activeMode === 'primary' && fs.existsSync(pmStatePath) && requestQueue.length === 0 && !isProcessingQueue) {
+        try {
+            const stateText = fs.readFileSync(pmStatePath, 'utf8').trim();
+            if (stateText) {
+                const state = JSON.parse(stateText);
+                const pending = (state.steps || []).some(s => s.status === 'pending');
+                if (pending) {
+                    const alreadyQueued = requestQueue.some(r => r.text === 'get_next_step');
+                    if (!alreadyQueued) {
+                        if (process.send) process.send({ type: 'ACTIVITY' });
+                        console.log(`\n🤖 [WEB AUTO-RESUME] Project plan detected. Nudging Niki...\n`);
+                        setTimeout(() => {
+                            if (isProcessingQueue) return;
+                            agent.setMode('team-manager');
+                            socket.emit('status', 'Resuming Project...');
+                            requestQueue.push({ 
+                                text: 'get_next_step', 
+                                resolve: () => {}, 
+                                reject: () => {} 
+                            });
+                            processQueue();
+                        }, 1000);
+                    }
+                }
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    const processQueue = async (autoStep = 0) => {
+        if (isProcessingQueue || requestQueue.length === 0) return;
+        isProcessingQueue = true;
+
+        const { text, draftMode, resolve, reject } = requestQueue.shift();
+
+        try {
+            socket.emit('status', 'Thinking...');
+            
+            const result = await (async () => {
+                const heartbeatInterval = setInterval(sendHeartbeat, 30000);
+                const originalMode = agent.activeMode;
+                try {
+                    if (draftMode) {
+                        agent.setMode('prompt-engineer');
+                    }
+                    return await agent.process(text, undefined, (chunk, isReasoning) => {
+                        if (isReasoning && agent.showThinking) {
+                            socket.emit('think_stream', chunk);
+                        } else if (!isReasoning) {
+                            socket.emit('content_stream', chunk);
+                        }
+                    });
+                } finally {
+                    clearInterval(heartbeatInterval);
+                    if (draftMode) {
+                        agent.setMode(originalMode);
+                    }
+                }
+            })();
+
+            // Handle Auto-Continue Relay
+            if (result.auto_continue && autoStep < 10) {
+                const handoffPath = path.resolve(process.cwd(), 'HANDOFF.json');
+                if (fs.existsSync(handoffPath)) {
+                    const handoff = JSON.parse(fs.readFileSync(handoffPath, 'utf-8'));
+                    const wakeUp = handoff.context;
+                    const targetRole = handoff.to;
+
+                    const roleConfig = ROLE_MODEL_MAP[targetRole] || ROLE_MODEL_MAP[`team-${targetRole}`];
+                    const activeModel = process.env.LLM_MODEL || "";
+                    
+                    if (roleConfig && roleConfig.modelId && roleConfig.modelId !== activeModel) {
+                        socket.emit('status', `Swapping brain for ${targetRole}...`);
+                        if (process.send) {
+                            process.send({ type: 'RESTART_LLAMA', model: roleConfig.modelId });
+                            await new Promise((resolveWait) => {
+                                const timeout = setTimeout(resolveWait, 60000);
+                                const handler = (m) => {
+                                    if (m.type === 'MODEL_UPDATED' && m.model === roleConfig.modelId) {
+                                        clearTimeout(timeout);
+                                        process.removeListener('message', handler);
+                                        resolveWait();
+                                    }
+                                };
+                                process.on('message', handler);
+                            });
+                        }
+                    }
+
+                    agent.setMode(handoff.to);
+                    isProcessingQueue = false;
+                    requestQueue.unshift({ text: wakeUp, resolve, reject });
+                    return processQueue(autoStep + 1);
+                }
+            }
+
+            resolve(result);
+        } catch (e) {
+            reject(e);
+        } finally {
+            isProcessingQueue = false;
+            socket.emit('status', requestQueue.length > 0 ? `Queued (${requestQueue.length} pending)...` : 'Idle');
+            processQueue(); 
+        }
+    };
+
+    socket.on('mlx_control', (data) => {
+        const action = typeof data === 'string' ? data : data.action;
+        const model = typeof data === 'object' ? data.model : null;
+        if (process.send) {
+            let type = 'RESTART_LLAMA';
+            if (action === 'stop') type = 'STOP_LLAMA';
+            process.send({ type, model: model || process.env.LLM_MODEL, forceClean: true });
+        }
+    });
+
+    socket.on('fix_zombies', async () => {
+        socket.emit('log', '🧹 Cleaning up zombie processes...');
+        try {
+            try { execSync('pkill -9 -f "mlx_vlm.server"'); } catch (e) {}
+            try { execSync('pkill -9 -f "mlx_lm"'); } catch (e) {}
+            try { execSync('pkill -9 -f "uvicorn"'); } catch (e) {}
+            try {
+                const pids = execSync('lsof -ti:18888').toString().trim();
+                if (pids) execSync(`kill -9 ${pids.split('\n').join(' ')}`);
+            } catch (e) {}
+            if (process.send && process.connected) {
+                process.send({ type: 'RESTART_LLAMA', model: process.env.LLM_MODEL, forceClean: true });
+            }
+            socket.emit('log', '✅ Zombie cleanup complete. Server restarting...');
+        } catch (e) {
+            socket.emit('log', `❌ Cleanup error: ${e.message}`);
+        }
+    });
+
+    socket.on('disconnect', (reason) => {
+        console.log(`🔌 [WEB] Client disconnected: ${reason}`);
+        if (agent.processing && agent.abortController) {
+            agent.abortController.abort();
+        }
+        requestQueue.length = 0;
+    });
+
+    socket.on('message', async (data) => {
+        sendHeartbeat();
+        const text = typeof data === 'string' ? data : data.text;
+        const draftMode = typeof data === 'object' ? data.draftMode : false;
+
+        if (text.startsWith('/')) {
+            const args = text.split(' ');
+            const cmd = args[0].toLowerCase();
+            if (cmd === '/model') {
+                const arg = args[1];
+                const MODEL_ID_MAP = {
+                    '1': 'Jackrong/MLX-Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-4bit',
+                    '2': 'Jackrong/MLX-Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-v2-4bit',
+                    '3': '/Users/nelsonwong/Documents/projects/Prometheus/models/Qwen3.5-9B-Claude-Abliterated-mxfp4',
+                    '4': 'mlx-community/Qwen2.5-Coder-14B-4bit'
+                };
+                const modelId = MODEL_ID_MAP[arg] || arg;
+
+                if (!modelId) {
+                    const helpMsg = `🧠 **Usage:** \`/model [1-4|name]\`\n\n**Presets:**\n1. Qwen 9B v2 (Reasoning)\n2. Qwen 4B v2 (Fast Reasoning)\n3. Qwen 9B (Abliterated)\n4. Coder 14B`;
+                    socket.emit('message', { role: 'assistant', content: helpMsg });
+                    return;
+                }
+
+                if (process.send) {
+                    process.send({ type: 'RESTART_LLAMA', model: modelId });
+                    socket.emit('message', { role: 'assistant', content: `🔄 Switching model to: **${modelId}**...` });
+                }
+                return;
+            }
+        }
+
+        if (requestQueue.length >= MAX_QUEUE_SIZE) {
+            socket.emit('message', { role: 'assistant', content: `⚠️ Queue is full.` });
+            return;
+        }
+
+        return new Promise((resolve, reject) => {
+            requestQueue.push({ text, draftMode, resolve, reject });
+            if (isProcessingQueue) {
+                socket.emit('status', `Queued (${requestQueue.length} pending)...`);
+            } else {
+                processQueue();
+            }
+        }).catch(async (e) => {
+            if (e.message !== "ABORTED_BY_USER") {
+                if (e.message.includes('fetch failed') || e.message.includes('ECONNREFUSED')) {
+                    socket.emit('status', '🔌 Model is sleeping. Waking up...');
+                    if (process.send && process.connected) {
+                        try { process.send({ type: 'RESTART_LLAMA' }); } catch(err) {}
+                    }
+                    setTimeout(() => {
+                        requestQueue.unshift({ text, resolve, reject });
+                        processQueue();
+                    }, 20000);
+                    return;
+                }
+                socket.emit('message', { role: 'assistant', content: `⚠️ Error: ${e.message}` });
+            }
+        });
+    });
+
+    socket.on('stop', () => {
+        requestQueue.length = 0;
+        agent.stop();
+        socket.emit('status', 'Interrupted');
+    });
+
+    socket.on('skill_toggle', (data) => {
+        const { name, enabled } = data;
+        if (agent.skills.has(name)) {
+            agent.toggleSkill(name, enabled);
+            broadcastSkills();
+        }
+    });
+
+    socket.on('update_config', (newConfig) => {
+        userConfig = { ...userConfig, ...newConfig };
+        if (newConfig.PROJECT_ROOT) process.env.PROJECT_ROOT = newConfig.PROJECT_ROOT;
+        if (newConfig.DOCUMENTS_ROOT) process.env.DOCUMENTS_ROOT = newConfig.DOCUMENTS_ROOT;
+        fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(userConfig, null, 2));
+        io.emit('config_info', userConfig);
+    });
+ 
+    socket.on('refresh_resources', async () => {
+        broadcastSkills(socket);
+        broadcastKnowledge(socket);
+        broadcastMemories(socket);
+        broadcastTeamInfo(socket);
+        await broadcastContext(socket);
+    });
+
+    socket.on('update_role_prompt', async (data) => {
+        const { name, prompt } = data;
+        try {
+            const filePath = path.join(process.cwd(), 'prompts', `${name}.md`);
+            if (fs.existsSync(filePath)) {
+                fs.writeFileSync(filePath, prompt, 'utf-8');
+                socket.emit('log', `✅ Persona for **${name}** updated.`);
+                broadcastTeamInfo();
+            }
+        } catch (e) {
+            socket.emit('log', `❌ Failed: ${e.message}`);
+        }
+    });
+  
+    socket.on('set_mode', (mode) => {
+        agent.setMode(mode);
+        broadcastContext();
+        socket.emit('log', `🎭 Active mode switched to **${mode}**.`);
+    });
+
+});
+
+// Bind Agent Events to Socket.io
+agent.on('message', (msg) => {
+    io.emit('message', msg);
+    broadcastContext();
+});
+
+agent.on('log', (content) => {
+    if (content && String(content).trim()) {
+        io.emit('log', content);
     }
 });
+
+agent.on('error', (err) => {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    io.emit('log', `🚨 [AGENT ERROR]: ${errorMsg}`);
+});
+
 agent.on('usage', (stats) => {
     io.emit('usage', stats);
 });
-
-    // Handled above in broadcastContext update
 
 agent.on('tool_start', (data) => {
     io.emit('tool_start', data);
@@ -752,19 +679,15 @@ agent.on('memory_pressure', (data) => {
 });
 
 agent.on('intent_trace', (data) => {
-    console.log('[DEBUG] Intent Trace Relay:', data.ranked[0]);
     io.emit('intent_trace', data);
 });
 
-
 // Start Server
-const PORT = 3000;
-
+const PROMETHEUS_URL = process.env.PROMETHEUS_URL || 'http://localhost:3000';
+const PORT = parseInt(new URL(PROMETHEUS_URL).port) || 3000;
 
 httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`\n🚀 Prometheus Dashboard: http://localhost:${PORT}`);
-
-    // Find Local IP for network access
     const interfaces = os.networkInterfaces();
     let localIp = 'Unknown';
     for (const name of Object.keys(interfaces)) {
@@ -776,7 +699,14 @@ httpServer.listen(PORT, '0.0.0.0', () => {
         }
         if (localIp !== 'Unknown') break;
     }
-
-    console.log(`🌍 LAN Access (Other devices): http://${localIp}:${PORT}`);
+    console.log(`🌍 LAN Access: http://${localIp}:${PORT}`);
     console.log(`🧠 Agent loaded with ${agent.skills.size} skills.`);
+}).on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        console.error(`\n❌ Error: Port ${PORT} is already in use.`);
+        process.exit(1);
+    } else {
+        console.error(`\n❌ Server Error:`, err);
+        process.exit(1);
+    }
 });

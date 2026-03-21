@@ -56,7 +56,7 @@ Prometheus includes a web dashboard to manage external Model Context Protocol (M
 
 ### 1. Accessing the Dashboard
 - Start Prometheus in web mode: `node prom.js --web`
-- Open your browser to `http://localhost:3000`
+- Open your browser to the URL defined in your `.env` (Default: `http://localhost:3000`)
 - Click the **MCP Hub** tab in the top right.
 
 ### 2. Managing Servers
@@ -169,7 +169,7 @@ lsof -i :18888
 ### 3. Check Model Responsiveness
 Ping the local API to see if the model is loaded and ready:
 ```bash
-curl http://127.0.0.1:18888/v1/models
+curl ${PROMETHEUS_URL:-http://127.0.0.1:3000}/v1/models
 ```
 
 ### 4. Memory Health Scan

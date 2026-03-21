@@ -1,22 +1,21 @@
-import 'dotenv/config';
 import { logDebug, logDebugError } from './logger.js';
+import { StreamWatchdog } from './loop-watchdog.js';
 /**
  * Prometheus LLM Interface
  * Routes requests to Gemini (cloud) or Qwen (local) based on availability.
  */
 
 const PORT_FAST  = parseInt(process.env.LLAMA_PORT || '18888');
-const PORT_HEAVY = parseInt(process.env.LLM_PORT_HEAVY || '18889');
 
 function getLocalUrl(port) {
-    return `http://127.0.0.1:${port || PORT_FAST}`;
+    return `http://127.0.0.1:${PORT_FAST}`;
 }
 
 async function isPortAvailable(port) {
     try {
-        const res = await fetch(`http://127.0.0.1:${port}/v1/models`, { signal: AbortSignal.timeout(2000) });
+        const res = await fetch(`http://127.0.0.1:${PORT_FAST}/v1/models`, { signal: AbortSignal.timeout(5000) });
         if (res.ok) return true;
-        const res2 = await fetch(`http://127.0.0.1:${port}/models`, { signal: AbortSignal.timeout(2000) });
+        const res2 = await fetch(`http://127.0.0.1:${PORT_FAST}/models`, { signal: AbortSignal.timeout(2000) });
         return res2.ok;
     } catch { return false; }
 }
@@ -29,27 +28,29 @@ const LOCAL_MODEL_HEAVY  = process.env.LLM_MODEL_HEAVY || 'Jackrong/MLX-Qwen3.5-
  * Check if local LLM server is available
  */
 async function isLocalAvailable() {
-    return await isPortAvailable(PORT_FAST) || await isPortAvailable(PORT_HEAVY);
+    return await isPortAvailable(PORT_FAST);
 }
 
 /**
  * Call Local LLM with retry logic
  */
-async function callLocal(messages, options = {}, targetModelOverride = null, targetPort = null) {
+async function callLocal(messages, options = {}, targetModelOverride = null) {
     const maxRetries = 3;
     let attempt = 0;
 
     while (attempt < maxRetries) {
         const targetModel = targetModelOverride || (options.deepThinking ? LOCAL_MODEL_HEAVY : LOCAL_MODEL_DEFAULT);
-        const urlPrefix = getLocalUrl(targetPort);
-        console.log(`[DEBUG] Calling ${urlPrefix}${targetModel.toLowerCase().includes('vl') || targetModel.toLowerCase().includes('qwen3.5') ? '/chat/completions' : '/v1/chat/completions'} (Attempt ${attempt + 1}/${maxRetries})`);
+        const isVL = targetModel.toLowerCase().includes('vlm');
+        const urlPrefix = getLocalUrl();
+        console.log(`[DEBUG] Calling ${urlPrefix}${isVL ? '/chat/completions' : '/v1/chat/completions'} (Attempt ${attempt + 1}/${maxRetries})`);
         try {
             const startTime = Date.now();
 
             // VL models launched via start_llama.sh currently use mlx_vlm, which omits the /v1 prefix.
             const modelNameLower = targetModel.toLowerCase();
-            const isVL = modelNameLower.includes('vl') || modelNameLower.includes('qwen3.5');
-            // mlx_vlm (used for Qwen3.5/VL) often exposes /chat/completions instead of /v1/chat/completions
+            // mlx_vlm.server (Vision models) uses /chat/completions
+            // mlx_lm.server (Standard LLMs, including Qwen 3.5) uses /v1/chat/completions
+            const isVL = modelNameLower.includes('vlm');
             const endpoint = isVL ? '/chat/completions' : '/v1/chat/completions';
 
             // mlx_vlm.server strict compatibility dictates omit adapters from generation payload
@@ -58,6 +59,7 @@ async function callLocal(messages, options = {}, targetModelOverride = null, tar
                 messages,
                 temperature: options.temperature ?? 0.0,
                 max_tokens: options.maxTokens ?? 2048,
+                repetition_penalty: 1.18,
                 stream: false
             };
             if (!isVL) reqBody.adapters = options.adapterPath || null;
@@ -124,12 +126,13 @@ async function callLocal(messages, options = {}, targetModelOverride = null, tar
 /**
  * Call Local Model (Streaming)
  */
-async function callLocalStreaming(messages, options = {}, targetModelOverride = null, targetPort = null) {
+async function callLocalStreaming(messages, options = {}, targetModelOverride = null) {
     const targetModel = targetModelOverride || (options.deepThinking ? LOCAL_MODEL_HEAVY : LOCAL_MODEL_DEFAULT);
-    const endpoint = '/v1/chat/completions';
+    const isVL = targetModel.toLowerCase().includes('vlm');
+    const endpoint = isVL ? '/chat/completions' : '/v1/chat/completions';
     console.log(`[DEBUG] Selected endpoint: ${endpoint} for model: ${targetModel}`);
 
-    const urlPrefix = getLocalUrl(targetPort);
+    const urlPrefix = getLocalUrl();
     console.log(`[DEBUG] Calling ${urlPrefix}${endpoint} with stream: true`);
 
     // TTFT Watchdog (Time To First Token) implementation with AbortController integration
@@ -146,6 +149,7 @@ async function callLocalStreaming(messages, options = {}, targetModelOverride = 
         messages,
         temperature: options.temperature ?? 0.0,
         max_tokens: options.maxTokens ?? 2048,
+        repetition_penalty: 1.18,
         stream: true
     };
 
@@ -187,6 +191,7 @@ async function callLocalStreaming(messages, options = {}, targetModelOverride = 
     let reasoningOut = '';
     let streamDone = false;
     let completionTokens = 0;
+    const watchdog = options.watchdog || new StreamWatchdog();
 
     while (!streamDone) {
         // High-level watchdog: if we stick in reader.read() too long, abort
@@ -244,6 +249,13 @@ async function callLocalStreaming(messages, options = {}, targetModelOverride = 
                         if (chunkContent) {
                             completionTokens++;
                             textOut += chunkContent;
+                            
+                            if (watchdog.push(chunkContent)) {
+                                console.error(`🚨 [WATCHDOG] Loop/Stall detected in content stream! Aborting.`);
+                                watchdogController.abort();
+                                throw new Error('LOOP_DETECTED');
+                            }
+
                             if (options.onToken) {
                                 options.onToken(chunkContent, false);
                             }
@@ -252,6 +264,13 @@ async function callLocalStreaming(messages, options = {}, targetModelOverride = 
                         if (chunkReasoning) {
                             completionTokens++;
                             reasoningOut += chunkReasoning;
+                            
+                            if (watchdog.push(chunkReasoning)) {
+                                console.error(`🚨 [WATCHDOG] Loop/Stall detected in reasoning stream! Aborting.`);
+                                watchdogController.abort();
+                                throw new Error('LOOP_DETECTED');
+                            }
+
                             if (options.onToken) {
                                 options.onToken(chunkReasoning, true);
                             }
@@ -345,11 +364,12 @@ export function setModelOverride(model) {
  */
 async function getLocalModels() {
     try {
-        let res = await fetch(`${getLocalUrl()}/v1/models`, { signal: AbortSignal.timeout(2000) });
+        const url = getLocalUrl();
+        let res = await fetch(`${url}/v1/models`, { signal: AbortSignal.timeout(2000) });
 
         // Fallback to mlx_vlm /models endpoint
         if (!res.ok) {
-            res = await fetch(`${getLocalUrl()}/models`, { signal: AbortSignal.timeout(2000) });
+            res = await fetch(`${url}/models`, { signal: AbortSignal.timeout(2000) });
         }
 
         if (!res.ok) return [];
@@ -373,16 +393,6 @@ export async function chat(messages, options = {}) {
     const targetLocalModel = options.modelId || (options.fast ? LOCAL_MODEL_DEFAULT : (options.deepThinking ? LOCAL_MODEL_HEAVY : LOCAL_MODEL_DEFAULT));
 
     // Determine which port to use
-    const isHeavyModel = targetLocalModel === LOCAL_MODEL_HEAVY;
-    let targetPort = isHeavyModel ? PORT_HEAVY : PORT_FAST;
-
-    // Fallback: if 2B server is down, route to heavy port
-    if (!isHeavyModel && !(await isPortAvailable(PORT_FAST))) {
-        if (await isPortAvailable(PORT_HEAVY)) {
-            console.log(`⚡ [ROUTING] 2B server offline. Falling back to 9B on port ${PORT_HEAVY}.`);
-            targetPort = PORT_HEAVY;
-        }
-    }
 
     // 0. Respect explicit overrides
     if (modelToUse === 'gemini') {
@@ -392,8 +402,8 @@ export async function chat(messages, options = {}) {
 
     if (modelToUse === 'local' && await isLocalAvailable()) {
         const result = options.onToken ? 
-            await callLocalStreaming(messages, options, targetLocalModel, targetPort) : 
-            await callLocal(messages, options, targetLocalModel, targetPort);
+            await callLocalStreaming(messages, options, targetLocalModel) : 
+            await callLocal(messages, options, targetLocalModel);
         return { ...result, model: 'local' };
     }
 
@@ -403,10 +413,9 @@ export async function chat(messages, options = {}) {
     const isRunningTarget = availableModels.includes(targetLocalModel);
 
     if (localUp && !isRunningTarget) {
-        console.log(`🔄 Model mismatch for port ${targetPort}! Available: ${availableModels.join(', ')}. Target: ${targetLocalModel}.`);
+        console.log(`🔄 Model mismatch! Available: ${availableModels.join(', ')}. Target: ${targetLocalModel}.`);
         if (process.send) {
-            const restartType = targetPort === PORT_HEAVY ? 'START_HEAVY_SERVER' : 'RESTART_LLAMA';
-            process.send({ type: restartType, model: targetLocalModel });
+            process.send({ type: 'RESTART_LLAMA', model: targetLocalModel });
 
             console.log('⏳ Waiting for model switch...');
             let attempts = 0;
@@ -454,7 +463,7 @@ export async function chat(messages, options = {}) {
 
     // 2. Local Usage
     if (options.deepThinking || options.forceLocal) {
-        const result = options.onToken ? await callLocalStreaming(messages, options) : await callLocal(messages, options);
+        const result = options.onToken ? await callLocalStreaming(messages, options, targetLocalModel) : await callLocal(messages, options, targetLocalModel);
         // Derive a readable model identifier from LLM_MODEL
         const modelStr = process.env.LLM_MODEL || 'local';
         const modelBase = modelStr.split('/').pop();

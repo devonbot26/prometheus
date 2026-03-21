@@ -9,7 +9,9 @@ Project Prometheus is a custom AI assistant framework designed for maximum user 
 *   **Autonomous Chaining**: Agents like the Lead Researcher can execute multi-step plans (e.g., scraping GitHub, analyzing Reddit sentiment, outputting Markdown) without manual intervention.
 *   **Integrated Memory**: Stores long-term context in a local SQLite/Vector database and directly interfaces with Obsidian Notebooks for human-readable tracking.
 *   **High-Performance Streaming**: Near-zero TTFT using NDJSON streams for local MLX models, matching OpenCode performance.
-*   **Safety Guards**: Integrated mid-stream watchdog and context pruning to prevent model repetition loops.
+*  - **Natively Integrated**: Deep macOS workspace integration with dynamic project pathing.
+- **Dynamic Instances**: Configurable server address via `PROMETHEUS_URL` for custom deployments.
+- **Zero-Overhead Reasoning**: Optimized model loading using Apple Silicon's unified memory.
 *   **OpenCode UI**: Premium vertically-bordered CLI with real-time dimmed reasoning blocks.
 
 ## 🤖 16 Specialized Skills

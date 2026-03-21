@@ -2,20 +2,17 @@ import 'dotenv/config';
 import { spawn, exec, execSync } from 'child_process';
 import os from 'os';
 import path from 'path';
-import { createWriteStream, existsSync, appendFileSync } from 'fs';
+import fs, { createWriteStream, existsSync, appendFileSync, readFileSync, writeFileSync } from 'fs';
 import { createInterface } from 'readline';
 import fetch from 'node-fetch';
 
 // Configuration
 const LLAMA_PORT = 18888;
-const WEB_PORT = 3000;
+const PROMETHEUS_URL = process.env.PROMETHEUS_URL || 'http://localhost:3000';
+const WEB_PORT = parseInt(new URL(PROMETHEUS_URL).port) || 3000;
 const CHECK_INTERVAL = 30000; // Reduced to 30s for faster memory response
 const HEALTH_TIMEOUT = 300000;
 const STARTUP_SCRIPT = './scripts/start_llama.sh';
-
-const HEAVY_PORT = 18889;
-let heavyServerProcess = null;
-let heavyServerModel = null;
 
 // ANSI Colors
 const C = {
@@ -29,27 +26,34 @@ const C = {
     dim: "\x1b[2m"
 };
 
+// Load User Config for environment consistency
+const USER_CONFIG_PATH = path.resolve(process.cwd(), 'config.json');
+if (existsSync(USER_CONFIG_PATH)) {
+    try {
+        const userConfig = JSON.parse(readFileSync(USER_CONFIG_PATH, 'utf-8'));
+        if (userConfig.PROJECT_ROOT) process.env.PROJECT_ROOT = userConfig.PROJECT_ROOT;
+        if (userConfig.DOCUMENTS_ROOT) process.env.DOCUMENTS_ROOT = userConfig.DOCUMENTS_ROOT;
+    } catch (e) {
+        console.error(`${C.red}⚠️ Failed to load config.json: ${e.message}${C.reset}`);
+    }
+}
+
 // Utilities
 function getFreeMemMB() {
     try {
         if (os.platform() === 'darwin') {
             const output = execSync('vm_stat').toString();
-            const freeMatch = output.match(/Pages free:\s+(\d+)/);
-            const inactiveMatch = output.match(/Pages inactive:\s+(\d+)/);
-            const speculativeMatch = output.match(/Pages speculative:\s+(\d+)/);
-
-            if (freeMatch && inactiveMatch) {
-                const free = parseInt(freeMatch[1]);
-                const inactive = parseInt(inactiveMatch[1]);
-                const speculative = speculativeMatch ? parseInt(speculativeMatch[1]) : 0;
-                const totalBytes = (free + inactive + speculative) * 16384;
-                return Math.floor(totalBytes / (1024 * 1024));
-            }
+            const pageSize = 16384; 
+            const free = parseInt(output.match(/Pages free:\s+(\d+)/)[1]);
+            const inactive = parseInt(output.match(/Pages inactive:\s+(\d+)/)[1]);
+            const speculative = parseInt(output.match(/Pages speculative:\s+(\d+)/)[1]);
+            const purgeable = parseInt(output.match(/Pages purgeable:\s+(\d+)/)[1]);
+            return Math.floor(((free + inactive + speculative + purgeable) * pageSize) / (1024 * 1024));
         }
+        return Math.floor(os.freemem() / (1024 * 1024));
     } catch (e) {
-        // Fallback
+        return Math.floor(os.freemem() / (1024 * 1024));
     }
-    return Math.floor(os.freemem() / (1024 * 1024));
 }
 
 
@@ -75,6 +79,7 @@ function logGepEvent(intent, signal, details) {
  * Persistently updates the LLM_MODEL in the .env file
  */
 function updateEnvModel(modelId) {
+    if (!modelId || modelId === 'undefined') return;
     try {
         const envPath = path.join(process.cwd(), '.env');
         if (!existsSync(envPath)) return;
@@ -249,40 +254,6 @@ function startLlamaServer(modelName) {
 
 }
 
-/**
- * Starts the Heavy Llama Server on port 18889
- */
-function startHeavyServer(modelName) {
-    const model = modelName || process.env.LLM_MODEL_HEAVY || 'Jackrong/MLX-Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-4bit';
-    console.log(`${C.magenta}🚀 Starting Heavy Llama Server on port ${HEAVY_PORT} with ${model}...${C.reset}`);
-
-    const logFile = createWriteStream('./logs/mlx_heavy.log', { flags: 'a' });
-
-    if (existsSync(STARTUP_SCRIPT)) {
-        heavyServerProcess = spawn('bash', [STARTUP_SCRIPT, model], {
-            stdio: 'pipe',
-            detached: true,
-            env: { ...process.env, PORT: HEAVY_PORT }
-        });
-    } else {
-        const pythonPath = 'python3';
-        heavyServerProcess = spawn(pythonPath, ['-m', 'mlx_lm', 'server', '--model', model, '--port', HEAVY_PORT, '--trust-remote-code'], {
-            stdio: 'pipe',
-            detached: true
-        });
-    }
-
-    heavyServerProcess.stdout.pipe(logFile);
-    heavyServerProcess.stderr.pipe(logFile);
-
-    heavyServerProcess.on('close', (code, signal) => {
-        console.log(`${C.magenta}⚠️  Heavy LLM Server exited (code=${code}, signal=${signal})${C.reset}`);
-        heavyServerProcess = null;
-        heavyServerModel = null;
-    });
-
-    heavyServerModel = model;
-}
 
 /**
  * Kill any process using a specific port with proper monitoring and timeout
@@ -298,7 +269,7 @@ async function killPort(port) {
     } catch (e) {
         // No process found on port
     }
-    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s for OS to release port
+    await new Promise(resolve => setTimeout(resolve, 2000)); // Increased to 2s for OS to release port
 }
 
 /**
@@ -322,16 +293,12 @@ async function killServer() {
     try { execSync('pkill -9 -f "mlx_lm"'); } catch (e) {}
     try { execSync('pkill -9 -f "uvicorn.*18888"'); } catch (e) {}
 
-    // 4. Wait for OS to release port (increased from 1s)
+    // 4. Kill web server on Port 3000 (if we are in a full restart)
+    await killPort(3000);
+
+    // 5. Wait for OS to release ports
     await new Promise(resolve => setTimeout(resolve, 2000));
 
-    // 5. Cleanup heavy server as well on full shutdown
-    if (heavyServerProcess) {
-        await killPort(HEAVY_PORT);
-        if (heavyServerProcess.pid) {
-            try { process.kill(-heavyServerProcess.pid, 'SIGKILL'); } catch (e) {}
-        }
-    }
 }
 
 /**
@@ -465,6 +432,7 @@ async function main() {
 
         proc.on('message', async (msg) => {
             lastActivityTime = Date.now();
+            /*
             // Memory management for 2B server based on UI process messages
             const freeMB = getFreeMemMB();
             if (freeMB < 3000 && serverProcess && !isRestarting) {
@@ -478,6 +446,7 @@ async function main() {
                 startLlamaServer(process.env.LLM_MODEL || 'mlx-community/Qwen3.5-2B-MLX-4bit');
                 return; // Stop processing other messages if relaunching
             }
+            */
 
             if (msg.type === 'SHUTDOWN') {
                 console.log(`\n${C.yellow}🔄 Manager: Received manual shutdown request from CLI.${C.reset}`);
@@ -492,16 +461,6 @@ async function main() {
                 return;
             }
 
-            if (msg.type === 'START_HEAVY_SERVER') {
-                if (!heavyServerProcess) {
-                    startHeavyServer(msg.model);
-                } else if (heavyServerModel !== msg.model) {
-                    console.log(`${C.magenta}🔄 Swapping heavy server model to: ${msg.model}${C.reset}`);
-                    killPort(HEAVY_PORT).then(() => {
-                        startHeavyServer(msg.model);
-                    });
-                }
-            }
             if (msg.type === 'RESTART_LLAMA') {
                 if (isRestarting && !msg.forceClean) return;
                 isRestarting = true;
@@ -591,8 +550,8 @@ async function main() {
             const isCrash = (code !== 0 && code !== null) || (code === null);
 
             if (isCrash) {
-                console.log(`${C.yellow}🔄 Supervisor: Node process crashed or was killed by signal ${signal}. Respawning ${name} in 3s... (Crash ${crashCount}/5)${C.reset}`);
-                setTimeout(startUI, 3000);
+                console.log(`${C.yellow}🔄 Supervisor: Node process crashed or was killed by signal ${signal}. Respawning ${name} in 5s... (Crash ${crashCount}/5)${C.reset}`);
+                setTimeout(startUI, 5000);
             } else {
                 // Normal exit (e.g. CTRL+C in CLI handled by child or process.exit(0))
                 console.log(`${C.dim}Supervisor: Normal exit detected. Cleaning up...${C.reset}`);
@@ -609,13 +568,13 @@ async function main() {
         const isHealthy = await checkServerHealth();
     const freeMB = getFreeMemMB();
 
-    // 1. Memory Pressure Offload (below 3GB)
-    if (freeMB < 3000 && serverProcess && !isRestarting) {
-        console.log(`${C.red}⚠️  CRITICAL MEMORY: ${freeMB}MB free. Offloading 2B server to prevent system swap.${C.reset}`);
+    // Auto-offload check (disabled by default to prevent SIGKILL on crowded systems)
+    if (freeMB < 50 && serverProcess && !isRestarting) {
+        console.log(`${C.red}⚠️  EXTREME LOW MEMORY: ${freeMB}MB free. System stability at risk.${C.reset}`);
+        // Only offload if absolutely necessary (<50MB)
         broadcastState('offloaded');
         await killServer();
-        // Log event for audit
-        logGepEvent('memory_offload', 'LOW_RAM', { free_mb: freeMB, action: 'offload_2b' });
+        logGepEvent('memory_offload', 'CRITICAL_RAM', { free_mb: freeMB, action: 'emergency_offload' });
     }
 
     // 2. Memory Recovery Auto-Start (above 6GB)

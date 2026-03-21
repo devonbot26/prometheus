@@ -1,0 +1,31 @@
+1. Check new email
+2. What's the weather today
+3. convert the pdf to markdown
+4. do a web search on yahoo news canada and write a summary on top 10 news
+suggest the mearsurement parameters
+
+
+Pretent you are me, run Prometheus project and ask folloqing questions to Devon:
+1. any new emails
+2. what's the weather today
+3. Do a web search on yahoo news canada and write a summary on top 10 news, in table format, left column is english and right column is TC.
+
+
+Download this video, split into 20 songs and convert to high quality mp3, the singer name is 鄭中基
+https://www.youtube.com/watch?v=A0loLRuZ1eY&list=RDA0loLRuZ1eY&start_radio=1
+
+https://www.youtube.com/watch?v=A0loLRuZ1eY&list=RDA0loLRuZ1eY&start_radio=1
+
+
+create a skill for this specific tasks, step by step list out the sub-tasks and at the beginning, model 9B are required and if current model is not 9B, handoff to 9B. After 9B finished the task, handoff back to current model 
+
+
+
+有冇新郵件?
+
+今天天氣如何?
+下載這個youtube playlist into mp3, 歌手是鄭中基
+
+下載這個youtube playlist 分割成30首歌曲, 歌手是周杰倫 : https://www.youtube.com/watch?v=C8p3amED03g&list=RDC8p3amED03g&start_radio=1
+
+https://www.youtube.com/watch?v=C8p3amED03g&list=RDC8p3amED03g&start_radio=1

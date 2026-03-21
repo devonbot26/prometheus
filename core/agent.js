@@ -25,34 +25,27 @@ import { resolveIntent, registerIntent } from './decision-tree.js';
 import { mcpManager } from './mcp-client.js';
 import { QUOTA_TIERS, quotaManager } from './quota-manager.js';
 import { memoryManager } from './memory-manager.js';
+import { StreamWatchdog } from './loop-watchdog.js';
 
 logDebug('[DEBUG] Loading core/agent.js...');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function getFreeMemMB() {
-
     try {
         if (os.platform() === 'darwin') {
             const output = execSync('vm_stat').toString();
-            // Match digits at start of line for specific keys
-            const freeMatch = output.match(/Pages free:\s+(\d+)/);
-            const inactiveMatch = output.match(/Pages inactive:\s+(\d+)/);
-            const speculativeMatch = output.match(/Pages speculative:\s+(\d+)/);
-
-            if (freeMatch && inactiveMatch) {
-                const free = parseInt(freeMatch[1]);
-                const inactive = parseInt(inactiveMatch[1]);
-                const speculative = speculativeMatch ? parseInt(speculativeMatch[1]) : 0;
-                // VM pages on Apple Silicon are 16KB
-                const totalBytes = (free + inactive + speculative) * 16384;
-                return Math.floor(totalBytes / (1024 * 1024));
-            }
+            const pageSize = 16384; 
+            const free = parseInt(output.match(/Pages free:\s+(\d+)/)[1]);
+            const inactive = parseInt(output.match(/Pages inactive:\s+(\d+)/)[1]);
+            const speculative = parseInt(output.match(/Pages speculative:\s+(\d+)/)[1]);
+            const purgeable = parseInt(output.match(/Pages purgeable:\s+(\d+)/)[1]);
+            return Math.floor(((free + inactive + speculative + purgeable) * pageSize) / (1024 * 1024));
         }
+        return Math.floor(os.freemem() / (1024 * 1024));
     } catch (e) {
-        // Log error to console hidden unless debug is on? For now just silent fallback.
+        return Math.floor(os.freemem() / (1024 * 1024));
     }
-    return Math.floor(os.freemem() / (1024 * 1024));
 }
 const HISTORY_PATH = path.join(__dirname, 'history.json');
 const STATE_PATH = path.join(__dirname, '..', 'STATE.md');
@@ -68,7 +61,7 @@ export const ROLE_MODEL_MAP = {
     'team-qa': { modelId: process.env.LLM_MODEL_HEAVY || process.env.LLM_MODEL, forceLocal: true, maxTokens: 4096 },
     'team-researcher': { modelId: process.env.LLM_MODEL_HEAVY || process.env.LLM_MODEL, forceLocal: true, maxTokens: 4096 },
     'team-manager': { modelId: process.env.LLM_MODEL_HEAVY || process.env.LLM_MODEL, forceLocal: true, deepThinking: true, maxTokens: 4096 },
-    'team-assistant': { modelId: process.env.LLM_MODEL, forceLocal: true, fast: true, maxTokens: 4096 }
+    'team-assistant': { modelId: process.env.LLM_MODEL_HEAVY || process.env.LLM_MODEL, forceLocal: true, maxTokens: 4096 }
 };
 
 export class Agent extends EventEmitter {
@@ -102,6 +95,7 @@ export class Agent extends EventEmitter {
         }
         this.clearState();
         this.progressState = ""; // Pinned task progress for context preservation
+        this.watchdog = new StreamWatchdog();
     }
 
     /**
@@ -498,13 +492,33 @@ export class Agent extends EventEmitter {
             let isSimpleGreeting = false;
             let isUtility = false;
             const startTime = Date.now();
-            let cleanMessage = userMessage; // Renamed from 'Message' to 'cleanMessage' to match existing usage
+            let cleanMessage = userMessage; 
             
             const ASSISTANT_SKILLS = ['gmail', 'weather', 'web-search', 'obsidian', 'knowledge-base', 'terminal'];
             const UTILITY_KEYWORDS = ['email', 'search', 'email', ...ASSISTANT_SKILLS];
 
-            // Phase 48: Explicit Persona Routing (Global Override)
             const lowerMsg = userMessage.toLowerCase().trim();
+
+            // Phase 51: /clear Command Interceptor
+            if (lowerMsg === '/clear') {
+                console.log('🧹 [COMMAND] "/clear" detected. Wiping chat history...');
+                this.history = [];
+                this.saveHistory(); 
+                
+                this.processing = false;
+                this.emit('message', {
+                    role: 'assistant',
+                    content: "🧹 Chat history cleared.",
+                    model: 'system-guard'
+                });
+                
+                return {
+                    text: "🧹 Chat history cleared.",
+                    model: 'system-guard'
+                };
+            }
+
+            console.log(`🔍 [ROUTING DEBUG] userMessage starts with: "${userMessage.substring(0, 50)}...", lowerMsg starts with: "${lowerMsg.substring(0, 50)}..."`);
             if (lowerMsg.startsWith('niki')) {
                 console.log(`🧠 [ROUTING] Explicit Niki prefix detected. Switching to 'team-manager' mode.`);
                 this.setMode('team-manager');
@@ -520,7 +534,7 @@ export class Agent extends EventEmitter {
             }
 
             // Phase 49: Utility Routing Override (Bypass Niki for Assistant tasks)
-            const isUtilityRequest = UTILITY_KEYWORDS.some(skill => lowerMsg.includes(skill));
+            const isUtilityRequest = UTILITY_KEYWORDS.some(skill => lowerMsg.includes(skill.toLowerCase()));
             
             if (isUtilityRequest && this.activeMode === 'team-manager' && !lowerMsg.startsWith('niki')) {
                 console.log(`🧠 [ROUTING] Utility request detected ("${lowerMsg}"). Overriding Niki to Devon.`);
@@ -554,7 +568,7 @@ export class Agent extends EventEmitter {
             isSimpleGreeting = greetings.includes(cleanMessage.toLowerCase());
             
             // Phase 5: Early Utility Detection for Routing & Pruning
-            isUtility = ['gmail', 'email', 'weather', 'search'].some(kw => lowerMsg.includes(kw));
+            isUtility = /\b(gmail|email|weather|search)\b/i.test(lowerMsg);
 
             // Phase 50: Low-Latency Routing (Route simple greetings to 2B)
             if (isSimpleGreeting && !deepThinking) {
@@ -599,7 +613,12 @@ export class Agent extends EventEmitter {
                 console.log('🎯 [PM MODE] Tool isolation active. Niki can see management, opencode, and assistant tools + detected skills.');
             } else if (this.activeMode.startsWith('team-')) {
                 // Phase 17: Strict Tool Masking for Sub-Agents (Devon/Architect/etc)
-                const baseTools = getToolDescriptionsForSkills(this.skills, ['terminal', 'self-coder', 'sys-admin', ...ASSISTANT_SKILLS]);
+                // Filter ASSISTANT_SKILLS and base skills to avoid duplication with detectionInjection
+                const intentRes = await resolveIntent(cleanMessage, this.history.slice(-3).map(m => m.content).join(' '), this.skills);
+                const detectedSkills = intentRes.skills;
+                const filteredBase = ['terminal', 'self-coder', 'sys-admin', 'gmail', 'search'].filter(s => !detectedSkills.includes(s));
+                
+                const baseTools = getToolDescriptionsForSkills(this.skills, filteredBase);
                 
                 // DELEGATION RULE: Only Niki (team-manager) can delegate. Devon (team-coder) works directly.
                 if (this.activeMode === 'team-coder' || this.activeMode === 'team-qa') {
@@ -842,7 +861,8 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
                 messages.push({ role: 'user', content: cleanMessage });
                 logDebug(`[DEBUG] History wiped for ultra-low memory stateless mode.`);
             } else if (lowMem || isSmallModel || (isGreeting && isPrivate) || isUtility) {
-                const historyLimit = (isGreeting || isUtility) ? -4 : -10;
+                // Phase 51: Strict context pruning for utility/greeting tasks to maximize TTFT speed
+                const historyLimit = (isGreeting || isUtility) ? -2 : -6;
                 messages.push({ role: 'system', content: finalPrompt });
                 messages.push(...cleanedHistory.slice(historyLimit));
                 logDebug(`[DEBUG] History pruned for ${isUtility ? 'utility' : isGreeting ? 'greeting' : 'low-mem'} focus. Limit: ${historyLimit}`);
@@ -889,7 +909,7 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
             const sentenceCounts = {};
             let lastFinishedIndex = -1;
 
-            let inThinkTag = forceDeepThinking;
+            let inThinkTag = false; // Fix: Always start as false; detect <think> dynamically to avoid hiding initial content
             let streamingBuffer = '';
             const watchdogCallback = (chunk, isReasoning) => {
                 if (streamAborted) return;
@@ -994,6 +1014,7 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
                 maxTokens: ultraLowMem ? 512 : 4096,
                 adapterPath: this.getAdapterPath(),
                 onToken: watchdogCallback,
+                watchdog: this.watchdog,
                 signal: this.abortController.signal
             };
 
@@ -1015,7 +1036,7 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
             const lastMsgContent = this.history.findLast(m => m.role === 'assistant')?.content || '';
             const isErrorLoop = lastMsgContent.includes('"error":');
 
-            if (isUtility && !isErrorLoop && !deepThinking) {
+            if (isUtility && !isErrorLoop && !deepThinking && this.activeMode !== 'team-manager') {
                 console.log(`⚡ [ROUTING] Utility request detected. Forcing fast 2B model.`);
                 chatOptions.modelId = process.env.LLM_MODEL;
                 chatOptions.fast = true;
@@ -1041,6 +1062,23 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
                     if (e.message && e.message.includes('429')) {
                         quotaManager.triggerSafeMode();
                         this.emit('log', '🚨 [QUOTA GUARD] Gemini returned 429. Entering Safe Mode for 1 hour.');
+                    }
+                    
+                    if (e.message === 'LOOP_DETECTED') {
+                        console.log('🚨 [AGENT] Autonomous Loop Recovery triggered.');
+                        this.emit('log', '⚠️ Loop detected. Attempting autonomous recovery...');
+                        
+                        // Phase 21: Recovery Injection
+                        const recoveryMsg = {
+                            role: 'user',
+                            content: `[RECOVERY_SYSTEM]: I detected a thinking loop or stalling. You are stuck. DO NOT REPEAT your previous logic. Look at DIFFERENT files or try a DIFFERENT terminal command now. DO NOT EXPLAIN, JUST ACT.`
+                        };
+                        
+                        // Prune history and retry
+                        this.history.splice(-1, 1);
+                        this.history.push(recoveryMsg);
+                        this.processing = false; // Reset mutex for retry
+                        return await this.process(userMessage, tier, streamCallback);
                     }
                     throw e;
                 }
@@ -1295,6 +1333,12 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
 
                             this.writeState(toolCall.tool, toolCall.args, cleanMessage);
                             this.emit('tool_start', { tool: toolCall.tool, args: toolCall.args });
+                            
+                            // L3 Redundancy Check
+                            if (this.watchdog.registerAction(toolCall.tool, toolCall.args)) {
+                                console.error(`🚨 [AGENT] Action redundancy loop detected: ${toolCall.tool}`);
+                                throw new Error('LOOP_DETECTED');
+                            }
 
                             let result;
                             try {
@@ -1422,6 +1466,15 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
                                     console.log(`     🔄 [PM STEP] Guiding Niki to next state after ${toolCall.tool}...`);
                                 }
                             }
+
+                            // Phase 52: Strip pre-tool hallucinations (DISABLED temporarily to allow model-generated UI placeholders)
+                            /*
+                            if (assistantText.includes('|') || assistantText.includes('°C')) {
+                                const cleanSnippet = assistantText.replace(/\|[\s\S]*?\|/g, '').replace(/###[\s\S]*?\n/g, '').trim();
+                                assistantText = cleanSnippet || "I am checking the resources now...";
+                                console.log(`🧹 [PRE-TOOL STRIP] Cleaned hallucinated table from pre-tool history.`);
+                            }
+                            */
 
                             this.history.push({ role: 'assistant', content: assistantText });
                             this.history.push({ role: 'user', content: toolResultMsg });
@@ -1554,7 +1607,9 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
                 if (middle.length > 2) {
                     console.log(`🧠 [SUMMARIZER] Compressing ${middle.length} turns of history...`);
                     const middleText = middle.map(m => `[${m.role.toUpperCase()}]: ${m.content.substring(0, 200)}`).join('\n');
+                    console.time('summarize');
                     const summary = await this.summarizeText(`Summarize the work done and current state described in these turns briefly:\n${middleText}`);
+                    console.timeEnd('summarize');
                     
                     this.history = [
                         ...goal,
@@ -1605,6 +1660,7 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
             // Final Sanitization Pass (Ensures follow-ups and auto-heals are clean)
             assistantText = cleanupAssistantText(assistantText, sanitizationMetadata);
 
+            console.log(`✅ [PROCESS] Turn complete. Emitting final message (${assistantText.length} chars).`);
             this.emit('message', {
                 role: 'assistant',
                 content: assistantText,
@@ -1891,7 +1947,7 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
             const response = await chat([
                 { role: 'system', content: 'You are a summarization utility. Be extremely concise.' },
                 { role: 'user', content: text }
-            ], { forceLocal: true, maxTokens: 256 });
+            ], { forceLocal: true, maxTokens: 256, signal: AbortSignal.timeout(60000) });
             return response.text;
         } catch (e) {
             return `[Summary failed: ${e.message}]`;

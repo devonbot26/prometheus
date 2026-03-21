@@ -5,15 +5,21 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Prometheus Dashboard</title>
-    <script src="/socket.io/socket.io.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script>
         mermaid.initialize({
             startOnLoad: false,
             theme: 'dark',
             securityLevel: 'loose',
             flowchart: { useMaxWidth: true, htmlLabels: true, curve: 'basis' }
+        });
+        
+        // Configure marked.js for line breaks
+        marked.setOptions({
+            breaks: true,
+            gfm: true
         });
     </script>
     <style>
@@ -211,6 +217,8 @@
             padding: 10px;
             border-radius: 8px;
             line-height: 1.5;
+            white-space: pre-wrap;
+            word-wrap: break-word;
         }
 
         .user {
@@ -527,6 +535,18 @@
                 <span style="color: #8b949e; font-weight: bold; font-size: 0.7rem;">MEM:</span>
                 <span id="mem-status" style="font-weight: bold; font-size: 0.75rem; color: var(--green);">Healthy</span>
             </div>
+            
+            <div style="display: flex; align-items: center; gap: 5px; background: rgba(0,0,0,0.2); padding: 2px 10px; border-radius: 4px; border: 1px solid var(--blue);">
+                <span style="color: var(--blue); font-weight: bold; font-size: 0.7rem; text-transform: uppercase;">Mode:</span>
+                <select id="modeSelector" onchange="switchMode(this.value)" style="background: transparent; color: var(--text); border: none; font-family: inherit; font-size: 0.8rem; font-weight: bold; cursor: pointer; outline: none; padding: 2px 0;">
+                    <option value="primary">Primary</option>
+                    <option value="chat" style="color: #000;">💬 Chat Only</option>
+                    <option value="plan" style="color: #000;">📝 Plan/Architect</option>
+                    <option value="team-manager" style="color: #000;">👥 Niki (PM)</option>
+                    <option value="team-coder" style="color: #000;">👨‍💻 Devon (Coder)</option>
+                </select>
+            </div>
+
             <button onclick="fixZombies()" style="background: rgba(248, 81, 73, 0.1); color: var(--red); border: 1px solid var(--red); padding: 2px 8px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.7rem;">🧹 Fix Zombies</button>
         </div>
     </div>
@@ -967,59 +987,36 @@
             const div = document.createElement('div');
             div.className = `msg ${role}`;
 
-            const urlRegex = /(https?:\/\/[^\s<]+)/g;
-            const mdLinkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
-
-            const formatText = (t) => {
-                if (!t) return '';
-                let safeText = t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
-
-                // 1. Hide Markdown links
-                const mdLinks = [];
-                safeText = safeText.replace(mdLinkRegex, (match, label, url) => {
-                    mdLinks.push(`<a href="${url}" target="_blank" style="color: var(--blue); text-decoration: underline;">${label}</a>`);
-                    return `__MD_LINK_${mdLinks.length - 1}__`;
-                });
-
-                // 2. Replace plain URLs
-                safeText = safeText.replace(urlRegex, (match) => {
-                    return `<a href="${match}" target="_blank" style="color: var(--blue); text-decoration: underline;">${match}</a>`;
-                });
-
-                // 3. Restore Markdown links
-                mdLinks.forEach((link, i) => {
-                    safeText = safeText.replace(`__MD_LINK_${i}__`, link);
-                });
-
-                return safeText;
-            };
-
-            // Main Content Rendering
-            if (text.includes('```')) {
+            // Handle special prompt-draft blocks first (custom Prometheus feature)
+            if (text.includes('```prompt-draft')) {
                 const parts = text.split('```');
                 let html = '';
                 parts.forEach((part, i) => {
-                    if (i % 2 === 1) {
-                        if (part.startsWith('prompt-draft\n')) {
-                            const draftContent = part.replace(/^prompt-draft\n/, '');
-                            const safeContent = draftContent.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;');
-                            html += `<div style="background: rgba(227, 179, 65, 0.1); border: 1px solid var(--yellow); border-radius: 8px; padding: 15px; margin: 15px 0;">
+                    if (i % 2 === 1 && part.startsWith('prompt-draft\n')) {
+                        const draftContent = part.replace(/^prompt-draft\n/, '');
+                        const safeContent = draftContent.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;');
+                        html += `<div style="background: rgba(227, 179, 65, 0.1); border: 1px solid var(--yellow); border-radius: 8px; padding: 15px; margin: 15px 0;">
                             <div style="color: var(--yellow); font-weight: bold; margin-bottom: 10px; border-bottom: 1px dashed var(--yellow); padding-bottom: 5px;">📝 Drafted Prompt</div>
                             <pre style="white-space: pre-wrap; font-family: monospace; color: #fff; margin-bottom: 15px;">${draftContent}</pre>
                             <button onclick="executeDraft('${safeContent}')" style="background: var(--green); color: white; border: none; padding: 8px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 8px; margin-left: auto;">
                                 🚀 Execute This Plan
                             </button>
                         </div>`;
-                        } else {
-                            html += `<pre style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 4px; overflow-x: auto;"><code>${part}</code></pre>`;
-                        }
                     } else {
-                        html += formatText(part);
+                        html += marked.parse(part);
                     }
                 });
                 div.innerHTML = html;
             } else {
-                div.innerHTML = formatText(text);
+                // Standard Markdown rendering
+                div.innerHTML = marked.parse(text);
+                
+                // Ensure links open in new tab
+                div.querySelectorAll('a').forEach(a => {
+                    a.target = '_blank';
+                    a.style.color = 'var(--blue)';
+                    a.style.textDecoration = 'underline';
+                });
             }
 
             // X-Ray Insight for Assistant
@@ -1209,11 +1206,21 @@
             socket.emit('request_context');
         }
 
+        function switchMode(mode) {
+            log(`🎭 Requesting mode switch to: ${mode}`);
+            socket.emit('set_mode', mode);
+        }
+
         socket.on('context_data', (data) => {
-            document.getElementById('ctx-mode').innerText = data.mode || 'Unknown';
+            const mode = data.mode || 'primary';
+            document.getElementById('ctx-mode').innerText = mode;
+            if (document.getElementById('modeSelector')) {
+                document.getElementById('modeSelector').value = mode;
+            }
+            
             document.getElementById('ctx-system').innerText = data.systemPrompt || 'No system prompt defined.';
             
-            // Update Plan State in Hub
+            // ... (rest of context_data logic)
             const planDiv = document.getElementById('ctx-plan');
             if (data.pmState && data.pmState.steps) {
                 let planHtml = `<div style="margin-bottom: 10px; border-bottom: 1px dashed #30363d; padding-bottom: 5px;">`;

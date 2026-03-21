@@ -1,6 +1,10 @@
 import { io } from 'socket.io-client';
+import dotenv from 'dotenv';
+dotenv.config({ path: 'prometheus.env' });
 
-const socket = io('http://localhost:3000');
+const PROMETHEUS_URL = process.env.PROMETHEUS_URL || 'http://localhost:3000';
+console.log(`📡 Connecting to: ${PROMETHEUS_URL}`);
+const socket = io(PROMETHEUS_URL);
 
 socket.on('connect', () => {
     console.log('✅ Connected to Prometheus for behavior test.');

@@ -286,17 +286,15 @@ function ask() {
             if (cmd === '/model') {
                 const arg = args[1];
                 const MODEL_ID_MAP = {
-                    '1': 'mlx-community/DeepSeek-R1-Distill-Qwen-14B-4bit',
-                    '2': 'mlx-community/Qwen2.5-Coder-14B-4bit',
-                    '3': 'Jackrong/MLX-Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-4bit',
-                    '4': '/Users/nelsonwong/Documents/projects/Prometheus/models/Qwen3.5-9B-Claude-Abliterated-mxfp4',
-                    '5': 'mlx-community/Qwen3.5-2B-MLX-4bit',
-                    '2b': 'mlx-community/Qwen3.5-2B-MLX-4bit'
+                    '1': 'Jackrong/MLX-Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-4bit',
+                    '2': 'Jackrong/MLX-Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-v2-4bit',
+                    '3': '/Users/nelsonwong/Documents/projects/Prometheus/models/Qwen3.5-9B-Claude-Abliterated-mxfp4',
+                    '4': 'mlx-community/Qwen2.5-Coder-14B-4bit'
                 };
                 const modelId = MODEL_ID_MAP[arg] || arg;
                 if (!modelId) {
-                    console.log(`\n🧠 Switch model: /model [id|name]`);
-                    console.log(`   Presets: 1(DeepSeek), 2(Coder), 3(Qwen9B), 4(MXFP4-9B), 5(Qwen2B)\n`);
+                    console.log(`\n🧠 **Usage:** /model [1-4|name]`);
+                    console.log(`   Presets: 1(Qwen9B v2), 2(Qwen4B v2), 3(Abliterated 9B), 4(Coder 14B)\n`);
                 } else {
                     if (process.send) {
                         sendActivity('RESTART_LLAMA', { model: modelId });
