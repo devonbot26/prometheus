@@ -28,6 +28,7 @@ tmp/
 # Large binaries and weights
 models/
 adapters/
+downloads/
 *.tar.gz
 *.gguf
 *.safetensors
