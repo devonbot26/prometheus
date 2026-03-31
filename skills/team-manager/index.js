@@ -17,7 +17,7 @@ function getValidRoles() {
         'team-architect', 'team-coder', 'team-designer', 'team-qa', 'team-researcher'];
 
     try {
-        const rolesDir = path.resolve(__dirname, '../../roles');
+        const rolesDir = path.resolve(__dirname, '../../prompts');
         if (fs.existsSync(rolesDir)) {
             const files = fs.readdirSync(rolesDir).filter(f => f.endsWith('.md'));
             for (const file of files) {
@@ -209,15 +209,172 @@ export async function mark_step_done(args) {
 
     state.steps[stepIndex].status = status;
     state.steps[stepIndex].result = result;
+    
+    // Increment retry count if it failed
+    if (status === 'failed') {
+        state.steps[stepIndex].retry_count = (state.steps[stepIndex].retry_count || 0) + 1;
+    }
 
     fs.writeFileSync(PM_STATE_PATH, JSON.stringify(state, null, 2));
+
+    // 🔄 Sync with Markdown file if we have a path
+    if (state.flow_path && fs.existsSync(state.flow_path)) {
+        try {
+            let md = fs.readFileSync(state.flow_path, 'utf-8');
+            const stepDesc = state.steps[stepIndex].description;
+            // Escape special chars for regex
+            const escapedDesc = stepDesc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            
+            if (status === 'completed') {
+                const regex = new RegExp(`- \\[ \\] (?:\\*\\*\\[.*?\\]\\*\\* )?${escapedDesc}`, 'g');
+                md = md.replace(regex, `- [x] ${stepDesc}`);
+            } else if (status === 'failed') {
+                const retryMsg = ` (FAILED ${state.steps[stepIndex].retry_count}/5)`;
+                const regex = new RegExp(`- \\[ \\] (?:\\*\\*\\[.*?\\]\\*\\* )?${escapedDesc}`, 'g');
+                md = md.replace(regex, `- [ ] ${stepDesc}${retryMsg}`);
+            }
+            
+            fs.writeFileSync(state.flow_path, md);
+            console.log(`📝 [FLOW] Synced step ${step_id} to ${state.flow_path}`);
+        } catch (e) {
+            console.error('⚠️ [FLOW] Failed to sync markdown:', e.message);
+        }
+    }
+
     const nextStep = state.steps.find(s => s.status === 'pending');
+
+    // 🚀 AUTO-RECOVERY & AUTO-ADVANCE
+    if (status === 'completed' && nextStep) {
+        console.log(`🚀 [FLOW] Step ${step_id} completed. Auto-advancing to next step...`);
+        return await continue_flow({ agent: args.agent });
+    } else if (status === 'failed' && state.steps[stepIndex].retry_count < 5) {
+        console.log(`🔄 [FLOW] Step ${step_id} failed. Auto-retrying (${state.steps[stepIndex].retry_count}/5)...`);
+        return await continue_flow({ agent: args.agent });
+    } else if (status === 'failed' && state.steps[stepIndex].retry_count >= 5) {
+        console.log(`🛑 [FLOW] Step ${step_id} failed 5 times. Stopping for guidance.`);
+        return {
+            error: `Step ${step_id} failed 5 times: ${result}`,
+            message: "Stopping flow for manual guidance. Please review the previous attempts."
+        };
+    }
 
     return {
         message: `Step ${step_id} marked as ${status}.`,
         next_step: nextStep || null,
-        auto_continue: !!nextStep // Trigger next thought if more steps exist
+        auto_continue: !!nextStep
     };
+}
+
+/**
+ * Parses a markdown file for tasks starting with "- [ ]"
+ */
+export async function import_flow(args) {
+    const filePath = args.path;
+    if (!filePath || !fs.existsSync(filePath)) {
+        return { error: `File not found: ${filePath}` };
+    }
+
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const lines = content.split('\n');
+    const steps = [];
+    let overallGoal = "Unspecified Goal";
+
+    // Extract Title/Goal
+    const titleMatch = content.match(/^# (.*)/);
+    if (titleMatch) overallGoal = titleMatch[1];
+
+    const stepRegex = /^- \[ \] (.*)/;
+    const roleRegex = /\*\*\[(.*?)\]\*\*/;
+
+    for (let i = 0; i < lines.length; i++) {
+        const match = lines[i].match(stepRegex);
+        if (match) {
+            let taskRaw = match[1];
+            let role = "team-coder"; // Default
+
+            const roleMatch = taskRaw.match(roleRegex);
+            if (roleMatch) {
+                role = roleMatch[1].toLowerCase().trim();
+                if (!role.startsWith('team-')) role = `team-${role}`;
+                taskRaw = taskRaw.replace(roleRegex, '').trim();
+            }
+
+            steps.push({
+                id: steps.length + 1,
+                description: taskRaw.replace(/^\*\*|\*\*$/g, '').trim(),
+                assignee: role,
+                status: 'pending',
+                retry_count: 0,
+                result: null
+            });
+        }
+    }
+
+    if (steps.length === 0) {
+        return { error: "No tasks found starting with '- [ ]'. Please check format." };
+    }
+
+    const state = {
+        title: overallGoal,
+        flow_path: filePath,
+        steps: steps,
+        current_step_id: 1,
+        started_at: new Date().toISOString()
+    };
+
+    fs.writeFileSync(PM_STATE_PATH, JSON.stringify(state, null, 2));
+    logAction("FLOW_IMPORTED", `Imported ${steps.length} steps from ${filePath}`, "team-manager");
+
+    return {
+        status: 'success',
+        message: `Imported flow "${overallGoal}" with ${steps.length} steps.`,
+        next_step: steps[0]
+    };
+}
+
+/**
+ * Resumes execution of the current plan from the next pending step.
+ * Uses Context Isolation to keep model responsive.
+ */
+export async function continue_flow(args) {
+    if (!fs.existsSync(PM_STATE_PATH)) {
+        return { error: "No active plan to continue." };
+    }
+
+    const state = JSON.parse(fs.readFileSync(PM_STATE_PATH, 'utf-8'));
+    const nextStep = state.steps.find(s => s.status === 'pending');
+
+    if (!nextStep) {
+        return { message: "Current flow is already 100% complete!", status: "finished" };
+    }
+
+    // 🏗️ Build the Mission Summary for Context Isolation
+    const completedSteps = state.steps.filter(s => s.status === 'completed');
+    let summary = `MISSION: ${state.title || "Prometheus Workflow"}\n\n`;
+    
+    if (completedSteps.length > 0) {
+        summary += "COMPLETED PROGRESS:\n";
+        completedSteps.forEach(s => {
+            summary += `- Step ${s.id}: ${s.description} (DONE: ${s.result?.substring(0, 150) || "No details"})\n`;
+        });
+        summary += "\n";
+    }
+
+    summary += `CURRENT OBJECTIVE (Step ${nextStep.id}):\n${nextStep.description}\n`;
+    summary += `ASSIGNEE: ${nextStep.assignee}\n`;
+
+    // 🧹 Wipe memory and inject summary
+    if (args.agent && args.agent.resetHistoryWithContext) {
+        args.agent.resetHistoryWithContext(summary);
+    }
+
+    // 🚀 Hand off control
+    console.log(`🚀 [FLOW] Handing off Step ${nextStep.id} to ${nextStep.assignee}...`);
+    return await handoff_to({
+        role: nextStep.assignee,
+        context: `You are assigned Step ${nextStep.id} of the flow. Task: ${nextStep.description}`,
+        _caller_role: 'team-manager'
+    });
 }
 
 /**

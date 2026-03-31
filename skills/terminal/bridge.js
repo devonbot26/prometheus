@@ -9,11 +9,13 @@ import { logDebug } from '../../core/logger.js';
  */
 export function terminal_run(args, options = {}) {
     return new Promise((resolve) => {
+        let isResolved = false;
         if (!args.command) {
+            isResolved = true;
             return resolve({ error: "No command provided" });
         }
 
-        const { onStream } = options;
+        const { onStream, abortSignal } = options;
         let command = args.command;
 
         const sendActivity = () => {
@@ -48,6 +50,7 @@ export function terminal_run(args, options = {}) {
         // Use HOME as cwd as per Prometheus convention
         const cp = spawn(command, {
             shell: true,
+            detached: true,
             cwd: process.env.PROJECT_ROOT || process.env.HOME,
             env: { ...process.env, PAGER: 'cat' } // Prevent interactive pagers
         });
@@ -55,6 +58,29 @@ export function terminal_run(args, options = {}) {
 
         let output = '';
         let errorOutput = '';
+        
+        const abortHandler = () => {
+            logDebug(`[DEBUG] Abort signal received for command: ${command}`);
+            clearInterval(activityInterval);
+            if (cp.pid) {
+                try {
+                    process.kill(-cp.pid, 'SIGKILL');
+                } catch (e) {
+                    // Ignore ESRCH error if already dead
+                }
+            }
+            if (isResolved) return;
+            isResolved = true;
+            resolve({
+                exitCode: 1,
+                error: "Process aborted by user",
+                output: output + "\n[Process Terminated by User]"
+            });
+        };
+
+        if (abortSignal) {
+            abortSignal.addEventListener('abort', abortHandler, { once: true });
+        }
 
         const sanitize = (text) => {
             // Noise Filter: Remove permission denied lines
@@ -92,7 +118,10 @@ export function terminal_run(args, options = {}) {
         });
 
         cp.on('close', async (code) => {
+            if (isResolved) return;
+            isResolved = true;
             clearInterval(activityInterval);
+            if (abortSignal) abortSignal.removeEventListener('abort', abortHandler);
 
             // Cap the final output for LLM context safety (Lesson #3)
             let finalOutput = output.trim();
@@ -122,7 +151,10 @@ export function terminal_run(args, options = {}) {
         });
 
         cp.on('error', (err) => {
+            if (isResolved) return;
+            isResolved = true;
             clearInterval(activityInterval);
+            if (abortSignal) abortSignal.removeEventListener('abort', abortHandler);
             resolve({
                 exitCode: 1,
                 error: err.message,

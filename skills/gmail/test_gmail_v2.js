@@ -6,7 +6,7 @@ async function testV2() {
     try {
         // 1. Test scan with including body
         console.log('\n🔍 Testing gmail_scan with includeBody: true...');
-        const scanRes = await gmail_scan({ query: 'after:2025/01/01', maxResults: 1, includeBody: true });
+        const scanRes = await gmail_scan({ maxResults: 1, includeBody: true });
         if (scanRes.success && scanRes.messages.length > 0) {
             const msg = scanRes.messages[0];
             console.log('✅ Found message:', msg.subject);
@@ -24,8 +24,23 @@ async function testV2() {
             } else {
                 console.log('❌ gmail_read failed:', readRes.error);
             }
+            
+            /*
+            // 3. Test gmail_batch_modify (Mark as Read/Unread)
+            // Warning: This will actually modify your email state.
+            console.log('\n📦 Testing gmail_batch_modify...');
+            const batchRes = await gmail_batch_modify({
+                ids: [msg.id],
+                removeLabelIds: ['UNREAD']
+            });
+            if (batchRes.success) {
+                console.log('✅ Success! Modified', batchRes.count, 'messages.');
+            } else {
+                console.log('❌ gmail_batch_modify failed:', batchRes.error);
+            }
+            */
         } else {
-            console.log('ℹ️ No messages found to test body extraction.');
+            console.log('ℹ️ No messages found to test.');
         }
 
     } catch (e) {

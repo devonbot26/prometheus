@@ -9,7 +9,7 @@ sequenceDiagram
     participant User as Native Dashboard (SwiftUI)
     participant WS as Web Server (Socket.io)
     participant Agent as Core Agent (agent.js)
-    participant FastLLM as MLX Fast (Qwen 2B : 18888)
+    participant FastLLM as MLX Fast (Qwen 4B : 18888)
     participant HeavyLLM as MLX Heavy (Qwen 9B : 18889)
     participant Skill as Gmail Skill (bridge.js)
     participant Google as Google APIs
@@ -28,7 +28,7 @@ sequenceDiagram
     Agent->>FastLLM: 1st Prompt: "any new emails?" + Skills JSON
     FastLLM-->>Agent: Output: `{"tool": "gmail_scan", "args": {"limit": 5}}`
     
-    note over Agent: If 2B Tool Failure -> Escalate to 9B (18889)
+    note over Agent: If 4B Tool Failure -> Escalate to 9B (18889)
     
     rect rgb(30, 50, 30)
         Note over Agent, Skill: Phase 2: Tool Execution
@@ -64,11 +64,11 @@ When you type **"any new emails?"** into the Swift Dashboard, the following sequ
 ### 2. Intent Routing & Fast Override
 - Internally, `core/agent.js` analyzes the text.
 - **Dynamic Skills**: The text contains "emails", so the Agent dynamically loads the highly-detailed JSON schema for the `gmail` skill into the context window.
-- **Fast Override Constraint**: As implemented recently, identifying the utility keyword "emails" forces the `chatOptions` to override Niki's heavy 9B model and strictly utilize the fast **Qwen3.5 2B Base model**.
+- **Fast Override Constraint**: As implemented recently, identifying the utility keyword "emails" forces the `chatOptions` to override Niki's heavy 9B model and strictly utilize the fast **Qwen3.5 4B Base model**.
 
 ### 3. The 1st LLM Pass (Tool Selection)
 - The Agent sends the user prompt + the Gmail tool format to the `mlx_lm.server` running locally on port 18888.
-- The 2B model receives the context, evaluates the user request ("any new emails"), and outputs a JSON tool call instead of talking:
+- The 4B model receives the context, evaluates the user request ("any new emails"), and outputs a JSON tool call instead of talking:
   ```json
   {
     "tool": "gmail_scan",
@@ -84,10 +84,10 @@ When you type **"any new emails?"** into the Swift Dashboard, the following sequ
 ### 5. The 2nd LLM Pass (Synthesis & Escalation)
 - The Agent takes the raw JSON data returned from Google and appends it to a hidden system prompt.
 - **Normal Flow**: It sends the conversation back to the `FastLLM` (18888) for a quick final response.
-- **Escalation Flow**: If the 2B model produced a malformed tool call or the skill returned a "RefID Error", the Agent checks if RAM > 6GB and automatically retries the logic using the **Heavy 9B model on port 18889**.
+- **Escalation Flow**: If the 4B model produced a malformed tool call or the skill returned a "RefID Error", the Agent checks if RAM > 6GB and automatically retries the logic using the **Heavy 9B model on port 18889**.
 - The model reads the tool data and generates the final response.
 
 ### 6. Streaming & Delivery
-- As the 2B model generates tokens, they are streamed chunk-by-chunk back through the Agent.
+- As the 4B model generates tokens, they are streamed chunk-by-chunk back through the Agent.
 - The Agent strips out unwanted boilerplate (e.g., "As an AI..." or raw `<think>` blocks).
 - Finally, the `channels/web_server.js` streams the clean text over the Socket.io connection back to your Native Dashboard, completing the "chat" interface cycle.

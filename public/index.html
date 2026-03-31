@@ -511,6 +511,109 @@
             color: var(--blue);
             font-weight: bold;
         }
+
+        /* Finder Styles */
+        #finder-hub-panel {
+            flex: 1;
+            display: none;
+            flex-direction: column;
+            padding: 20px;
+            overflow: hidden;
+            border-right: 1px solid #30363d;
+        }
+
+        .finder-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding: 10px;
+            background: var(--term-bg);
+            border: 1px solid #30363d;
+            border-radius: 6px;
+        }
+
+        .finder-path {
+            font-size: 0.85rem;
+            color: var(--blue);
+            font-family: monospace;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1;
+            margin-right: 10px;
+        }
+
+        .file-list {
+            flex: 1;
+            overflow-y: auto;
+            background: #000;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+        }
+
+        .file-item {
+            display: grid;
+            grid-template-columns: 24px 1fr 100px 150px;
+            gap: 10px;
+            padding: 8px 15px;
+            border-bottom: 1px solid #161b22;
+            cursor: pointer;
+            font-size: 0.85rem;
+            align-items: center;
+        }
+
+        .file-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .file-icon {
+            text-align: center;
+        }
+
+        .file-name {
+            color: var(--text);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .file-name.dir {
+            color: var(--blue);
+            font-weight: bold;
+        }
+
+        .file-size {
+            color: #8b949e;
+            text-align: right;
+            font-size: 0.75rem;
+        }
+
+        .file-mtime {
+            color: #8b949e;
+            text-align: right;
+            font-size: 0.75rem;
+        }
+        .msg-metrics {
+            font-size: 0.7rem;
+            color: #8b949e;
+            border-top: 1px dashed #30363d;
+            margin-top: 15px;
+            padding-top: 10px;
+            display: flex;
+            gap: 15px;
+            opacity: 0.8;
+            font-family: var(--font-mono);
+        }
+        .msg-metrics span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .msg-metrics .metric-val {
+            color: var(--blue);
+            font-weight: bold;
+        }
     </style>
 </head>
 
@@ -521,6 +624,7 @@
             <div style="margin-left: 20px; display: flex; gap: 5px;">
                 <button class="tab-btn active" onclick="switchTab('chat')">Chat Hub</button>
                 <button class="tab-btn" onclick="switchTab('mcp')">MCP Hub</button>
+                <button class="tab-btn" onclick="switchTab('finder')">📁 Finder</button>
                 <button class="tab-btn" onclick="switchTab('context')">🧠 Context Hub</button>
                 <button class="tab-btn" onclick="switchTab('team')">👥 Team Hub</button>
             </div>
@@ -572,6 +676,17 @@
 
         <div id="social-panel" style="display: none; padding: 20px; flex: 1; overflow-y: auto; border-right: 1px solid #30363d;">
             <div id="social-list"></div>
+        </div>
+
+        <div id="finder-hub-panel">
+            <div class="finder-toolbar">
+                <div class="finder-path" id="finder-current-path">/</div>
+                <button onclick="navigateBack()" style="background: var(--term-bg); border: 1px solid #30363d; padding: 4px 10px; font-size: 0.75rem;">⬅️ Back</button>
+                <button onclick="refreshFiles()" style="background: var(--term-bg); border: 1px solid #30363d; padding: 4px 10px; font-size: 0.75rem; margin-left: 5px;">🔄 Refresh</button>
+            </div>
+            <div class="file-list" id="finder-file-list">
+                <div style="padding: 20px; color: #8b949e; text-align: center;">Loading files...</div>
+            </div>
         </div>
 
 
@@ -697,6 +812,19 @@
             const snippet = thinkingBuffer.slice(-70).replace(/\n/g, ' ').trim();
             statusDiv.textContent = `Thinking: ${snippet}...`;
             statusDiv.style.color = 'var(--yellow)';
+        });
+
+        socket.on('content_stream', (chunk) => {
+            let lastMsg = messagesDiv.lastElementChild;
+            if (!lastMsg || !lastMsg.classList.contains('assistant') || lastMsg._isFinal) {
+                // Start a new assistant message for the stream
+                addMessage('assistant', chunk);
+            } else {
+                // Update existing stream
+                lastMsg._textContent = (lastMsg._textContent || '') + chunk;
+                renderMessageInto(lastMsg, lastMsg._textContent);
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            }
         });
 
         socket.on('terminal_stream', (chunk) => {
@@ -922,10 +1050,10 @@
             log('❌ Lost connection to Prometheus server.');
         });
 
-        socket.on('message', (data) => {
-            addMessage(data.role, data.content, data.rawContent, data.strips);
-            if (data.model) {
-                document.getElementById('active-model').textContent = data.model;
+        socket.on('message', (msg) => {
+            addMessage(msg.role, msg.content, msg.rawContent, msg.strips, msg.performance);
+            if (msg.model) {
+                document.getElementById('active-model').textContent = msg.model;
             }
         });
 
@@ -975,7 +1103,10 @@
                 renderUnifiedActivity();
             }
 
-            socket.emit('message', text);
+            socket.emit('message', {
+                text: text,
+            clientTimestamp: Date.now()
+            });
             input.value = '';
         }
 
@@ -983,10 +1114,30 @@
             if (e.key === 'Enter') send();
         });
 
-        function addMessage(role, text, raw = null, strips = []) {
+        function addMessage(role, text, raw = null, strips = [], performance = null) {
+            // Smoothing Logic: If the last message is an assistant stream, update it instead of appending
+            const lastMsg = messagesDiv.lastElementChild;
+            if (role === 'assistant' && lastMsg && lastMsg.classList.contains('assistant') && !lastMsg._isFinal) {
+                // If it's a final message (has performance) or if we are just updating a stream, replace content
+                if (performance) lastMsg._isFinal = true;
+                lastMsg._textContent = text;
+                renderMessageInto(lastMsg, text, raw, strips, performance);
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                return;
+            }
+
             const div = document.createElement('div');
             div.className = `msg ${role}`;
+            div._textContent = text;
+            if (role === 'assistant' && performance) div._isFinal = true;
+            renderMessageInto(div, text, raw, strips, performance);
+            messagesDiv.appendChild(div);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
 
+        function renderMessageInto(div, text, raw, strips, performance) {
+            div.innerHTML = '';
+            
             // Handle special prompt-draft blocks first (custom Prometheus feature)
             if (text.includes('```prompt-draft')) {
                 const parts = text.split('```');
@@ -1019,8 +1170,22 @@
                 });
             }
 
+            // Performance Metrics Injection
+            if (performance) {
+                const metricsDiv = document.createElement('div');
+                metricsDiv.className = 'msg-metrics';
+                metricsDiv.innerHTML = `
+                    <span>⚡ <span class="metric-val">${performance.tps}</span> t/s</span>
+                    <span>⌛ <span class="metric-val">${performance.ttft}</span> TTFT</span>
+                    <span>⏱️ <span class="metric-val">${performance.latency}</span></span>
+                    <span>📦 <span class="metric-val">${performance.usage.total}</span> tokens</span>
+                    ${performance.steps > 1 ? `<span>🔄 <span class="metric-val">${performance.steps}</span> steps</span>` : ''}
+                `;
+                div.appendChild(metricsDiv);
+            }
+
             // X-Ray Insight for Assistant
-            if (role === 'assistant' && raw && raw !== text) {
+            if (raw && raw !== text) {
                 const xrayBtn = document.createElement('button');
                 xrayBtn.className = 'xray-btn';
                 xrayBtn.innerHTML = '👁️ X-Ray';
@@ -1030,7 +1195,6 @@
                 xrayPanel.className = 'xray-panel';
 
                 let highlighted = raw;
-                // Simple highlight for strips
                 if (strips && strips.length > 0) {
                     strips.forEach(s => {
                         highlighted = highlighted.replace(s, `<del>${s}</del>`);
@@ -1055,9 +1219,6 @@
                     messagesDiv.scrollTop = messagesDiv.scrollHeight;
                 };
             }
-
-            messagesDiv.appendChild(div);
-            messagesDiv.scrollTop = messagesDiv.scrollHeight;
         }
 
         function log(text) {
@@ -1106,11 +1267,11 @@
             if (activeBtn) activeBtn.classList.add('active');
 
             // Toggle Panel Visibility
-            const panels = ['chat-panel', 'mcp-hub-panel', 'context-hub-panel', 'team-hub-panel'];
+            const panels = ['chat-panel', 'mcp-hub-panel', 'context-hub-panel', 'team-hub-panel', 'finder-hub-panel'];
             panels.forEach(id => {
                 const el = document.getElementById(id);
                 if (el) {
-                    const isTarget = id === `${tab}-panel` || (id === 'chat-panel' && tab === 'chat') || (id === 'mcp-hub-panel' && tab === 'mcp') || (id === 'context-hub-panel' && tab === 'context') || (id === 'team-hub-panel' && tab === 'team');
+                    const isTarget = id === `${tab}-panel` || (id === 'chat-panel' && tab === 'chat') || (id === 'mcp-hub-panel' && tab === 'mcp') || (id === 'context-hub-panel' && tab === 'context') || (id === 'team-hub-panel' && tab === 'team') || (id === 'finder-hub-panel' && tab === 'finder');
                     el.style.display = isTarget ? (id.includes('hub') || id === 'chat-panel' ? 'flex' : 'block') : 'none';
                 }
             });
@@ -1127,6 +1288,8 @@
                 requestContext();
             } else if (tab === 'team') {
                 socket.emit('refresh_resources');
+            } else if (tab === 'finder') {
+                refreshFiles();
             }
         }
 
@@ -1437,6 +1600,76 @@
                 memorySection.appendChild(card);
             });
         }
+
+        // --- FINDER LOGIC ---
+        let currentFinderPath = '';
+        
+        function refreshFiles() {
+            socket.emit('list_files', { path: currentFinderPath });
+        }
+
+        function navigateBack() {
+            if (!currentFinderPath) return;
+            const parts = currentFinderPath.split('/').filter(p => p);
+            parts.pop();
+            currentFinderPath = parts.join('/');
+            refreshFiles();
+        }
+
+        function enterDir(name) {
+            currentFinderPath = currentFinderPath ? `${currentFinderPath}/${name}` : name;
+            refreshFiles();
+        }
+
+        function formatSize(bytes) {
+            if (!bytes) return '--';
+            const units = ['B', 'KB', 'MB', 'GB'];
+            let i = 0;
+            while (bytes >= 1024 && i < units.length - 1) {
+                bytes /= 1024;
+                i++;
+            }
+            return `${bytes.toFixed(1)} ${units[i]}`;
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return '--';
+            const d = new Date(dateStr);
+            return d.toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        }
+
+        socket.on('files_info', (data) => {
+            const list = document.getElementById('finder-file-list');
+            const pathDisplay = document.getElementById('finder-current-path');
+            
+            if (data.error) {
+                list.innerHTML = `<div style="padding: 20px; color: var(--red); text-align: center;">Error: ${data.error}</div>`;
+                return;
+            }
+
+            pathDisplay.innerText = data.fullPath;
+            currentFinderPath = data.path;
+
+            if (!data.files || data.files.length === 0) {
+                list.innerHTML = '<div style="padding: 20px; color: #8b949e; text-align: center;">This directory is empty.</div>';
+                return;
+            }
+
+            list.innerHTML = '';
+            data.files.forEach(f => {
+                const item = document.createElement('div');
+                item.className = 'file-item';
+                item.onclick = f.isDir ? () => enterDir(f.name) : null;
+                
+                item.innerHTML = `
+                    <div class="file-icon">${f.isDir ? '📁' : '📄'}</div>
+                    <div class="file-name ${f.isDir ? 'dir' : ''}">${f.name}</div>
+                    <div class="file-size">${f.isDir ? '--' : formatSize(f.size)}</div>
+                    <div class="file-mtime">${formatDate(f.mtime)}</div>
+                `;
+                list.appendChild(item);
+            });
+        });
     </script>
 </body>
 

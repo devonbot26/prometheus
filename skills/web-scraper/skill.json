@@ -43,6 +43,24 @@
                     "required": false
                 }
             }
+        },
+        "discover_api": {
+            "path": "index.js",
+            "function": "discover_api",
+            "description": "Performs deep network exploration of a website to identify internal API endpoints and JSON signatures. Useful for 'Teachable Agent' workflows.",
+            "strategy": "INTERCEPT",
+            "parameters": {
+                "url": {
+                    "type": "string",
+                    "description": "The URL to explore.",
+                    "required": true
+                },
+                "timeout": {
+                    "type": "number",
+                    "description": "Exploration timeout (default 10000ms).",
+                    "required": false
+                }
+            }
         }
     }
 }

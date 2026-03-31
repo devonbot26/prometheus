@@ -67,6 +67,17 @@ export function loadSkills() {
 }
 
 /**
+ * Supported Tool Strategies
+ */
+export const Strategy = {
+    UI: 'UI',               // Requires a full browser/visible UI
+    INTERCEPT: 'INTERCEPT', // Operates via network interception/APIs
+    COOKIE: 'COOKIE',       // Operates via direct HTTP requests with cookies
+    NATIVE: 'NATIVE',       // Direct OS or Dashboard Bridge interaction
+    DEFAULT: 'DEFAULT'      // Standard logic fallback
+};
+
+/**
  * Execute a tool from a loaded skill
  * @param {Map} skills - loaded skills map
  * @param {string} toolName - e.g. "gmail_scan"
@@ -77,6 +88,7 @@ export async function executeTool(skills, toolName, args = {}, options = {}) {
     for (const [name, skill] of skills) {
         if (skill.toolNames.includes(toolName)) {
             const toolDef = skill.meta.tools[toolName];
+            const strategy = toolDef.strategy || Strategy.DEFAULT;
 
             // If it's a virtual/MCP skill, it won't have a dir. Skip path joining.
             if (!skill.dir) continue;
@@ -91,7 +103,7 @@ export async function executeTool(skills, toolName, args = {}, options = {}) {
                 throw new Error(`Tool "${toolName}" not found as export in ${modulePath}`);
             }
 
-            console.log(`🔧 Running ${name}/${toolName}...`);
+            console.log(`🔧 [STRATEGY: ${strategy}] Running ${name}/${toolName}...`);
             return await fn(args, options);
         }
     }

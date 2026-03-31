@@ -1,6 +1,7 @@
 import Trafilatura from './lib/trafilatura/index.js';
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import { TrafficAnalyzer } from '../../core/traffic-analyzer.js';
 
 // Use same stealth as js-trafilatura fetcher
 puppeteer.use(StealthPlugin());
@@ -94,5 +95,56 @@ export async function crawl_site(args) {
         };
     } catch (error) {
         return { error: `Crawl failed: ${error.message}` };
+    }
+}
+
+/**
+ * 🔍 DISCOVER_API (OpenCLI Pattern)
+ * Best for: Identifying private APIs, JSON endpoints, and internal site logic.
+ * Features: Network interception, signature mapping, traffic condensation.
+ */
+export async function discover_api(args) {
+    const { url, timeout = 10000 } = args;
+    if (!url) return { error: "Missing URL." };
+
+    console.log(`\n🔍 [Web-Scraper] Discovering APIs: ${url}`);
+    
+    const analyzer = new TrafficAnalyzer();
+    let browser;
+
+    try {
+        browser = await puppeteer.launch({
+            headless: "new",
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
+
+        const page = await browser.newPage();
+        
+        // Enable interception logic
+        await page.setRequestInterception(true);
+        page.on('request', request => {
+            request.continue();
+        });
+
+        page.on('response', response => {
+            analyzer.addRecord(response.request(), response);
+        });
+
+        // Navigate and wait for some idle time
+        await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+        
+        // Give it a few seconds for lazy/deferred requests
+        await new Promise(r => setTimeout(r, 2000));
+
+        const signatures = analyzer.getSignatureMap();
+
+        return {
+            result: `--- API Discovery: ${url} ---\nFound ${signatures.length} unique endpoint signatures.`,
+            signatures: signatures.filter(s => s.is_api || s.calls > 1) // Prioritize JSON or high-frequency calls
+        };
+    } catch (error) {
+        return { error: `Discovery failed: ${error.message}` };
+    } finally {
+        if (browser) await browser.close();
     }
 }

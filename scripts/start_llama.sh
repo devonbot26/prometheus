@@ -1,7 +1,7 @@
 #!/bin/bash
 # Prometheus MLX Launcher
 
-DEFAULT_MODEL="mlx-community/Qwen3.5-2B-4bit"
+DEFAULT_MODEL="Jackrong/MLX-Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-v2-4bit"
 MODEL_ID="${1:-$DEFAULT_MODEL}"
 DRAFT_MODEL="$2"
 PORT=18888
@@ -34,13 +34,20 @@ if [ -n "$DRAFT_MODEL" ]; then
     DRAFT_ARGS="--draft-model $DRAFT_MODEL"
 fi
 
+KV_ARGS=""
+if [ -n "$KV_BITS" ]; then
+    KV_ARGS="--kv-bits $KV_BITS --kv-group-size ${KV_GROUP_SIZE:-64}"
+    echo "🧊 KV Cache Quantization enabled: ${KV_BITS}-bit"
+fi
+
 # Determine Server Type based on Model variant
 # Standard Text Models: qwen3.5-4b, qwen3.5-9b, nanbeige
 # Vision Models: typically contain '-vl'
+# Standard Text Models apply KV Cache quantization, Vision models do not (currently)
 if [[ "$MODEL_NAME" == *"-vl"* ]] || [[ "$MODEL_NAME" == *"vision"* ]]; then
     echo "👁️ Vision-Language Model detected. Booting via mlx_vlm.server..."
     exec ./training_venv/bin/python3 -m mlx_vlm.server --port $PORT --trust-remote-code
 else
     echo "📝 Standard Text Model detected. Booting via mlx_lm.server..."
-    exec ./training_venv/bin/python3 -m mlx_lm server --model "$MODEL_ID" --port $PORT --trust-remote-code $ADAPTER_ARGS $DRAFT_ARGS
+    exec ./training_venv/bin/python3 -m mlx_lm server --model "$MODEL_ID" --port $PORT --trust-remote-code $ADAPTER_ARGS $DRAFT_ARGS $KV_ARGS
 fi

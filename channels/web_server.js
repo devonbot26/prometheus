@@ -21,6 +21,7 @@ import { initCronJobs } from '../core/cron.js';
 import { INTENT_SCHEMA } from '../core/decision-tree.js';
 import { projectIndexer } from '../services/project-indexer.js';
 import os from 'os';
+import { SelfReflection } from '../services/self-reflection.js';
 
 // Configuration persistence
 const USER_CONFIG_PATH = path.resolve(process.cwd(), 'config.json');
@@ -139,6 +140,9 @@ app.use(express.json());
 // Start Autonomous Services
 const emailWatcher = new EmailWatcher(agent, io);
 emailWatcher.start();
+
+const selfReflection = new SelfReflection(agent, io);
+selfReflection.start();
 
 // Initialize background cron jobs
 initCronJobs(agent, (output) => {
@@ -523,6 +527,10 @@ io.on('connection', (socket) => {
         sendHeartbeat();
         const text = typeof data === 'string' ? data : data.text;
         const draftMode = typeof data === 'object' ? data.draftMode : false;
+        
+        const clientTs = data.clientTimestamp || Date.now();
+        const ingressLatency = Date.now() - clientTs;
+        console.log(`\n⏱️  [T0] Dashboard -> Server Ingress: ${ingressLatency}ms`);
 
         if (text.startsWith('/')) {
             const args = text.split(' ');
@@ -631,6 +639,58 @@ io.on('connection', (socket) => {
         socket.emit('log', `🎭 Active mode switched to **${mode}**.`);
     });
 
+    socket.on('list_files', (data) => {
+        const requestedPath = data?.path || '';
+        let targetPath = path.isAbsolute(requestedPath) 
+            ? requestedPath 
+            : path.join(userConfig.PROJECT_ROOT, requestedPath);
+
+        // Security check: Must be within PROJECT_ROOT or DOCUMENTS_ROOT
+        const isWithinProject = targetPath.startsWith(userConfig.PROJECT_ROOT);
+        const isWithinDocs = targetPath.startsWith(userConfig.DOCUMENTS_ROOT);
+
+        if (!isWithinProject && !isWithinDocs) {
+            socket.emit('log', `⚠️ Access denied: ${targetPath}`);
+            return;
+        }
+
+        try {
+            if (!fs.existsSync(targetPath)) {
+                socket.emit('files_info', { path: requestedPath, files: [], error: 'Path does not exist' });
+                return;
+            }
+
+            const stats = fs.statSync(targetPath);
+            if (!stats.isDirectory()) {
+                socket.emit('files_info', { path: requestedPath, files: [], error: 'Not a directory' });
+                return;
+            }
+
+            const files = fs.readdirSync(targetPath).map(file => {
+                const filePath = path.join(targetPath, file);
+                try {
+                    const s = fs.statSync(filePath);
+                    return {
+                        name: file,
+                        isDir: s.isDirectory(),
+                        size: s.size,
+                        mtime: s.mtime
+                    };
+                } catch (e) {
+                    return { name: file, error: 'Access denied' };
+                }
+            });
+
+            socket.emit('files_info', { 
+                path: requestedPath, 
+                fullPath: targetPath,
+                files: files.sort((a, b) => (b.isDir - a.isDir) || a.name.localeCompare(b.name))
+            });
+        } catch (e) {
+            socket.emit('log', `❌ Error listing files: ${e.message}`);
+        }
+    });
+
 });
 
 // Bind Agent Events to Socket.io
@@ -665,7 +725,13 @@ agent.on('tool_end', (data) => {
     if (data.result && data.result.error) {
         io.emit('log', `❌ Tool error (${data.tool}): ${data.result.error}`);
     } else {
-        io.emit('log', `✅ Tool finished: ${data.tool}`);
+        // Truncate result for log
+        let resultSnippet = "";
+        if (data.result) {
+            const raw = typeof data.result === 'string' ? data.result : JSON.stringify(data.result);
+            resultSnippet = raw.length > 200 ? raw.substring(0, 200) + "..." : raw;
+        }
+        io.emit('log', `✅ Tool finished: ${data.tool}\nResult: ${resultSnippet}`);
     }
     io.emit('status', 'Thinking...');
 });

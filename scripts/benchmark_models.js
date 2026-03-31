@@ -3,9 +3,9 @@ import fs from 'fs';
 import path from 'path';
 
 const models = [
+    { name: 'Qwen 3.5 Distill 4B (H)', id: 'Jackrong/MLX-Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-v2-4bit' },
     { name: 'DeepSeek Uncensored', id: 'mlx-community/DeepSeek-R1-Distill-Qwen-14B-abliterated-v2-Q4-mlx' },
-    { name: 'Qwen Coder 14B', id: 'mlx-community/Qwen2.5-Coder-14B-4bit' },
-    { name: 'Qwen 3.5 Distill 9B', id: 'Jackrong/MLX-Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-4bit' }
+    { name: 'Qwen Coder 14B', id: 'mlx-community/Qwen2.5-Coder-14B-4bit' }
 ];
 
 const question = "Design a self-healing node.js supervisor that uses IPC heartbeats to detect child process hangs and performs a port-clean kill before respawning. Explain the edge cases of zombie processes and PID wraparound.";

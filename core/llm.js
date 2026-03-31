@@ -1,5 +1,6 @@
 import { logDebug, logDebugError } from './logger.js';
 import { StreamWatchdog } from './loop-watchdog.js';
+import { withLock } from './llm_lock.js';
 /**
  * Prometheus LLM Interface
  * Routes requests to Gemini (cloud) or Qwen (local) based on availability.
@@ -21,7 +22,7 @@ async function isPortAvailable(port) {
 }
 const GEMINI_MODEL = 'gemini-2.0-flash';
 
-const LOCAL_MODEL_DEFAULT = process.env.LLM_MODEL || 'mlx-community/Qwen3.5-2B-MLX-4bit';
+const LOCAL_MODEL_DEFAULT = process.env.LLM_MODEL || 'Jackrong/MLX-Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-v2-4bit';
 const LOCAL_MODEL_HEAVY  = process.env.LLM_MODEL_HEAVY || 'Jackrong/MLX-Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-4bit';
 
 /**
@@ -98,6 +99,8 @@ async function callLocal(messages, options = {}, targetModelOverride = null) {
                 text = reasoning;
             }
 
+            const ttft = (endTime - startTime); // For non-streaming, TTFT is total time unless we use a probe
+            
             return {
                 text,
                 reasoning,
@@ -106,7 +109,8 @@ async function callLocal(messages, options = {}, targetModelOverride = null) {
                     completion_tokens: completionTokens,
                     total_tokens: totalTokens
                 },
-                tps: parseFloat(tps)
+                tps: parseFloat(tps),
+                ttft
             };
         } catch (e) {
             attempt++;
@@ -197,7 +201,7 @@ async function callLocalStreaming(messages, options = {}, targetModelOverride = 
         // High-level watchdog: if we stick in reader.read() too long, abort
         const readPromise = reader.read();
         const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error("STREAM_READ_TIMEOUT")), 60000)
+            setTimeout(() => reject(new Error("STREAM_READ_TIMEOUT")), 120000)
         );
 
         let value, done;
@@ -244,13 +248,16 @@ async function callLocalStreaming(messages, options = {}, targetModelOverride = 
                     if (json.choices && json.choices[0] && json.choices[0].delta) {
                         const delta = json.choices[0].delta;
                         const chunkContent = delta.content || delta.text || ''; 
-                        const chunkReasoning = delta.reasoning || '';
+                        const chunkReasoning = delta.reasoning || delta.reasoning_content || '';
+
+                        if (chunkContent || chunkReasoning) {
+                            completionTokens++;
+                        }
 
                         if (chunkContent) {
-                            completionTokens++;
                             textOut += chunkContent;
                             
-                            if (watchdog.push(chunkContent)) {
+                            if (watchdog && watchdog.push(chunkContent)) {
                                 console.error(`🚨 [WATCHDOG] Loop/Stall detected in content stream! Aborting.`);
                                 watchdogController.abort();
                                 throw new Error('LOOP_DETECTED');
@@ -262,10 +269,9 @@ async function callLocalStreaming(messages, options = {}, targetModelOverride = 
                         }
 
                         if (chunkReasoning) {
-                            completionTokens++;
                             reasoningOut += chunkReasoning;
                             
-                            if (watchdog.push(chunkReasoning)) {
+                            if (watchdog && watchdog.push(chunkReasoning)) {
                                 console.error(`🚨 [WATCHDOG] Loop/Stall detected in reasoning stream! Aborting.`);
                                 watchdogController.abort();
                                 throw new Error('LOOP_DETECTED');
@@ -290,6 +296,8 @@ async function callLocalStreaming(messages, options = {}, targetModelOverride = 
 
     clearTimeout(ttftTimeout);
 
+    const ttft = firstTokenTime ? (firstTokenTime - reqStart) : (endTime - reqStart);
+
     return {
         text: textOut,
         reasoning: reasoningOut,
@@ -297,7 +305,8 @@ async function callLocalStreaming(messages, options = {}, targetModelOverride = 
             completion_tokens: completionTokens,
             total_tokens: completionTokens
         },
-        tps: parseFloat(tps)
+        tps: parseFloat(tps),
+        ttft
     };
 }
 
@@ -387,10 +396,11 @@ let currentLocalModel = null; // Track what we think is running
  * Main chat function
  */
 export async function chat(messages, options = {}) {
-    const modelToUse = options.forceModel || modelOverride;
+    return await withLock('prometheus', async () => {
+        const modelToUse = options.forceModel || modelOverride;
 
-    // Determine target local model
-    const targetLocalModel = options.modelId || (options.fast ? LOCAL_MODEL_DEFAULT : (options.deepThinking ? LOCAL_MODEL_HEAVY : LOCAL_MODEL_DEFAULT));
+        // Determine target local model
+        const targetLocalModel = options.modelId || (options.fast ? LOCAL_MODEL_DEFAULT : (options.deepThinking ? LOCAL_MODEL_HEAVY : LOCAL_MODEL_DEFAULT));
 
     // Determine which port to use
 
@@ -498,6 +508,7 @@ export async function chat(messages, options = {}) {
     }
 
     throw new Error('No LLM available');
+    });
 }
 
 /**

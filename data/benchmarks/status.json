@@ -1,0 +1,613 @@
+{
+  "started_at": "2026-03-31T00:34:08.351Z",
+  "current_run": null,
+  "completed_runs": [
+    {
+      "runId": "4B_baseline",
+      "model": "4B",
+      "kv_mode": 16,
+      "results": [
+        {
+          "success": true,
+          "ttft_ms": 14286,
+          "tps": 0,
+          "duration_s": 47.279,
+          "mem_before": {
+            "rss_mb": 2687,
+            "swap_mb": 0,
+            "compressed_mb": 410,
+            "timestamp": "2026-03-31T00:59:10.364Z"
+          },
+          "mem_after": {
+            "rss_mb": 2727,
+            "swap_mb": 0,
+            "compressed_mb": 407,
+            "timestamp": "2026-03-31T00:59:57.730Z"
+          },
+          "tokens_in": 8000,
+          "tokens_out": 0,
+          "runId": "4B_baseline",
+          "kvBits": 16,
+          "modelName": "4B"
+        },
+        {
+          "success": true,
+          "ttft_ms": 14212,
+          "tps": 0,
+          "duration_s": 92.02,
+          "mem_before": {
+            "rss_mb": 2865,
+            "swap_mb": 0,
+            "compressed_mb": 357,
+            "timestamp": "2026-03-31T01:01:28.142Z"
+          },
+          "mem_after": {
+            "rss_mb": 2895,
+            "swap_mb": 0,
+            "compressed_mb": 357,
+            "timestamp": "2026-03-31T01:03:00.248Z"
+          },
+          "tokens_in": 16000,
+          "tokens_out": 0,
+          "runId": "4B_baseline",
+          "kvBits": 16,
+          "modelName": "4B"
+        },
+        {
+          "success": true,
+          "ttft_ms": 14211,
+          "tps": 0,
+          "duration_s": 190.209,
+          "mem_before": {
+            "rss_mb": 2861,
+            "swap_mb": 0,
+            "compressed_mb": 356,
+            "timestamp": "2026-03-31T01:03:25.501Z"
+          },
+          "mem_after": {
+            "rss_mb": 2569,
+            "swap_mb": 0,
+            "compressed_mb": 406,
+            "timestamp": "2026-03-31T01:06:35.795Z"
+          },
+          "tokens_in": 32000,
+          "tokens_out": 0,
+          "runId": "4B_baseline",
+          "kvBits": 16,
+          "modelName": "4B"
+        },
+        {
+          "success": true,
+          "ttft_ms": 14265,
+          "tps": 0,
+          "duration_s": 302.078,
+          "mem_before": {
+            "rss_mb": 2861,
+            "swap_mb": 0,
+            "compressed_mb": 377,
+            "timestamp": "2026-03-31T01:07:01.015Z"
+          },
+          "mem_after": {
+            "rss_mb": 2567,
+            "swap_mb": 0,
+            "compressed_mb": 496,
+            "timestamp": "2026-03-31T01:12:03.180Z"
+          },
+          "tokens_in": 48000,
+          "tokens_out": 0,
+          "runId": "4B_baseline",
+          "kvBits": 16,
+          "modelName": "4B"
+        },
+        {
+          "success": true,
+          "ttft_ms": 14238,
+          "tps": 0,
+          "duration_s": 426.673,
+          "mem_before": {
+            "rss_mb": 2861,
+            "swap_mb": 0,
+            "compressed_mb": 452,
+            "timestamp": "2026-03-31T01:12:28.455Z"
+          },
+          "mem_after": {
+            "rss_mb": 2556,
+            "swap_mb": 0,
+            "compressed_mb": 611,
+            "timestamp": "2026-03-31T01:19:35.215Z"
+          },
+          "tokens_in": 64000,
+          "tokens_out": 0,
+          "runId": "4B_baseline",
+          "kvBits": 16,
+          "modelName": "4B"
+        },
+        {
+          "success": true,
+          "ttft_ms": 14331,
+          "tps": 0,
+          "duration_s": 734.671,
+          "mem_before": {
+            "rss_mb": 2860,
+            "swap_mb": 0,
+            "compressed_mb": 572,
+            "timestamp": "2026-03-31T01:20:00.477Z"
+          },
+          "mem_after": {
+            "rss_mb": 2507,
+            "swap_mb": 312,
+            "compressed_mb": 345,
+            "timestamp": "2026-03-31T01:32:15.222Z"
+          },
+          "tokens_in": 96000,
+          "tokens_out": 0,
+          "runId": "4B_baseline",
+          "kvBits": 16,
+          "modelName": "4B"
+        },
+        {
+          "success": true,
+          "ttft_ms": 14167,
+          "tps": 0,
+          "duration_s": 958.939,
+          "mem_before": {
+            "rss_mb": 2861,
+            "swap_mb": 312,
+            "compressed_mb": 267,
+            "timestamp": "2026-03-31T01:32:40.484Z"
+          },
+          "mem_after": {
+            "rss_mb": 0,
+            "swap_mb": 470,
+            "compressed_mb": 295,
+            "timestamp": "2026-03-31T01:48:39.489Z"
+          },
+          "tokens_in": 128000,
+          "tokens_out": 0,
+          "runId": "4B_baseline",
+          "kvBits": 16,
+          "modelName": "4B"
+        }
+      ]
+    },
+    {
+      "runId": "4B_optimized",
+      "model": "4B",
+      "kv_mode": 4,
+      "results": [
+        {
+          "success": true,
+          "ttft_ms": 14027,
+          "tps": 0,
+          "duration_s": 46.669,
+          "mem_before": {
+            "rss_mb": 2864,
+            "swap_mb": 470,
+            "compressed_mb": 151,
+            "timestamp": "2026-03-31T01:50:04.727Z"
+          },
+          "mem_after": {
+            "rss_mb": 2895,
+            "swap_mb": 470,
+            "compressed_mb": 149,
+            "timestamp": "2026-03-31T01:50:51.469Z"
+          },
+          "tokens_in": 8000,
+          "tokens_out": 0,
+          "runId": "4B_optimized",
+          "kvBits": 4,
+          "modelName": "4B"
+        },
+        {
+          "success": true,
+          "ttft_ms": 14030,
+          "tps": 0,
+          "duration_s": 91.168,
+          "mem_before": {
+            "rss_mb": 2862,
+            "swap_mb": 470,
+            "compressed_mb": 148,
+            "timestamp": "2026-03-31T01:51:15.678Z"
+          },
+          "mem_after": {
+            "rss_mb": 2892,
+            "swap_mb": 470,
+            "compressed_mb": 139,
+            "timestamp": "2026-03-31T01:52:46.918Z"
+          },
+          "tokens_in": 16000,
+          "tokens_out": 0,
+          "runId": "4B_optimized",
+          "kvBits": 4,
+          "modelName": "4B"
+        },
+        {
+          "success": true,
+          "ttft_ms": 14046,
+          "tps": 0,
+          "duration_s": 189.665,
+          "mem_before": {
+            "rss_mb": 2861,
+            "swap_mb": 470,
+            "compressed_mb": 137,
+            "timestamp": "2026-03-31T01:53:11.084Z"
+          },
+          "mem_after": {
+            "rss_mb": 2898,
+            "swap_mb": 470,
+            "compressed_mb": 124,
+            "timestamp": "2026-03-31T01:56:20.820Z"
+          },
+          "tokens_in": 32000,
+          "tokens_out": 0,
+          "runId": "4B_optimized",
+          "kvBits": 4,
+          "modelName": "4B"
+        },
+        {
+          "success": true,
+          "ttft_ms": 14064,
+          "tps": 0,
+          "duration_s": 301.827,
+          "mem_before": {
+            "rss_mb": 2861,
+            "swap_mb": 470,
+            "compressed_mb": 124,
+            "timestamp": "2026-03-31T01:56:45.034Z"
+          },
+          "mem_after": {
+            "rss_mb": 2905,
+            "swap_mb": 470,
+            "compressed_mb": 116,
+            "timestamp": "2026-03-31T02:01:46.934Z"
+          },
+          "tokens_in": 48000,
+          "tokens_out": 0,
+          "runId": "4B_optimized",
+          "kvBits": 4,
+          "modelName": "4B"
+        },
+        {
+          "success": true,
+          "ttft_ms": 14089,
+          "tps": 0,
+          "duration_s": 428.72,
+          "mem_before": {
+            "rss_mb": 2860,
+            "swap_mb": 470,
+            "compressed_mb": 116,
+            "timestamp": "2026-03-31T02:02:12.152Z"
+          },
+          "mem_after": {
+            "rss_mb": 2918,
+            "swap_mb": 470,
+            "compressed_mb": 114,
+            "timestamp": "2026-03-31T02:09:20.947Z"
+          },
+          "tokens_in": 64000,
+          "tokens_out": 0,
+          "runId": "4B_optimized",
+          "kvBits": 4,
+          "modelName": "4B"
+        },
+        {
+          "success": true,
+          "ttft_ms": 14125,
+          "tps": 0,
+          "duration_s": 737.173,
+          "mem_before": {
+            "rss_mb": 2863,
+            "swap_mb": 470,
+            "compressed_mb": 112,
+            "timestamp": "2026-03-31T02:09:46.161Z"
+          },
+          "mem_after": {
+            "rss_mb": 2513,
+            "swap_mb": 470,
+            "compressed_mb": 257,
+            "timestamp": "2026-03-31T02:22:03.413Z"
+          },
+          "tokens_in": 96000,
+          "tokens_out": 0,
+          "runId": "4B_optimized",
+          "kvBits": 4,
+          "modelName": "4B"
+        },
+        {
+          "success": true,
+          "ttft_ms": 14164,
+          "tps": 0,
+          "duration_s": 966.92,
+          "mem_before": {
+            "rss_mb": 2863,
+            "swap_mb": 470,
+            "compressed_mb": 185,
+            "timestamp": "2026-03-31T02:22:28.652Z"
+          },
+          "mem_after": {
+            "rss_mb": 0,
+            "swap_mb": 499,
+            "compressed_mb": 283,
+            "timestamp": "2026-03-31T02:38:35.638Z"
+          },
+          "tokens_in": 128000,
+          "tokens_out": 0,
+          "runId": "4B_optimized",
+          "kvBits": 4,
+          "modelName": "4B"
+        }
+      ]
+    },
+    {
+      "runId": "9B_baseline",
+      "model": "9B",
+      "kv_mode": 16,
+      "results": [
+        {
+          "success": true,
+          "ttft_ms": 25741,
+          "tps": 0,
+          "duration_s": 84.379,
+          "mem_before": {
+            "rss_mb": 5381,
+            "swap_mb": 499,
+            "compressed_mb": 167,
+            "timestamp": "2026-03-31T02:41:36.273Z"
+          },
+          "mem_after": {
+            "rss_mb": 5417,
+            "swap_mb": 499,
+            "compressed_mb": 152,
+            "timestamp": "2026-03-31T02:43:00.729Z"
+          },
+          "tokens_in": 8000,
+          "tokens_out": 0,
+          "runId": "9B_baseline",
+          "kvBits": 16,
+          "modelName": "9B"
+        },
+        {
+          "success": true,
+          "ttft_ms": 25733,
+          "tps": 0,
+          "duration_s": 162.861,
+          "mem_before": {
+            "rss_mb": 5409,
+            "swap_mb": 499,
+            "compressed_mb": 144,
+            "timestamp": "2026-03-31T02:43:25.940Z"
+          },
+          "mem_after": {
+            "rss_mb": 5439,
+            "swap_mb": 499,
+            "compressed_mb": 130,
+            "timestamp": "2026-03-31T02:46:08.877Z"
+          },
+          "tokens_in": 16000,
+          "tokens_out": 0,
+          "runId": "9B_baseline",
+          "kvBits": 16,
+          "modelName": "9B"
+        },
+        {
+          "success": true,
+          "ttft_ms": 25744,
+          "tps": 0,
+          "duration_s": 329.528,
+          "mem_before": {
+            "rss_mb": 5407,
+            "swap_mb": 499,
+            "compressed_mb": 130,
+            "timestamp": "2026-03-31T02:46:34.102Z"
+          },
+          "mem_after": {
+            "rss_mb": 5444,
+            "swap_mb": 499,
+            "compressed_mb": 121,
+            "timestamp": "2026-03-31T02:52:03.700Z"
+          },
+          "tokens_in": 32000,
+          "tokens_out": 0,
+          "runId": "9B_baseline",
+          "kvBits": 16,
+          "modelName": "9B"
+        },
+        {
+          "success": true,
+          "ttft_ms": 25762,
+          "tps": 0,
+          "duration_s": 508.966,
+          "mem_before": {
+            "rss_mb": 5407,
+            "swap_mb": 499,
+            "compressed_mb": 121,
+            "timestamp": "2026-03-31T02:52:28.888Z"
+          },
+          "mem_after": {
+            "rss_mb": 5163,
+            "swap_mb": 499,
+            "compressed_mb": 142,
+            "timestamp": "2026-03-31T03:00:57.929Z"
+          },
+          "tokens_in": 48000,
+          "tokens_out": 0,
+          "runId": "9B_baseline",
+          "kvBits": 16,
+          "modelName": "9B"
+        }
+      ]
+    },
+    {
+      "runId": "9B_optimized",
+      "model": "9B",
+      "kv_mode": 4,
+      "results": [
+        {
+          "success": true,
+          "ttft_ms": 25721,
+          "tps": 0,
+          "duration_s": 84.371,
+          "mem_before": {
+            "rss_mb": 5409,
+            "swap_mb": 499,
+            "compressed_mb": 119,
+            "timestamp": "2026-03-31T03:02:24.131Z"
+          },
+          "mem_after": {
+            "rss_mb": 5398,
+            "swap_mb": 499,
+            "compressed_mb": 123,
+            "timestamp": "2026-03-31T03:03:48.582Z"
+          },
+          "tokens_in": 8000,
+          "tokens_out": 0,
+          "runId": "9B_optimized",
+          "kvBits": 4,
+          "modelName": "9B"
+        },
+        {
+          "success": true,
+          "ttft_ms": 25730,
+          "tps": 0,
+          "duration_s": 162.865,
+          "mem_before": {
+            "rss_mb": 5409,
+            "swap_mb": 499,
+            "compressed_mb": 123,
+            "timestamp": "2026-03-31T03:04:13.802Z"
+          },
+          "mem_after": {
+            "rss_mb": 5442,
+            "swap_mb": 499,
+            "compressed_mb": 122,
+            "timestamp": "2026-03-31T03:06:56.741Z"
+          },
+          "tokens_in": 16000,
+          "tokens_out": 0,
+          "runId": "9B_optimized",
+          "kvBits": 4,
+          "modelName": "9B"
+        },
+        {
+          "success": true,
+          "ttft_ms": 25745,
+          "tps": 0,
+          "duration_s": 329.642,
+          "mem_before": {
+            "rss_mb": 5412,
+            "swap_mb": 499,
+            "compressed_mb": 122,
+            "timestamp": "2026-03-31T03:07:21.952Z"
+          },
+          "mem_after": {
+            "rss_mb": 5448,
+            "swap_mb": 499,
+            "compressed_mb": 115,
+            "timestamp": "2026-03-31T03:12:51.672Z"
+          },
+          "tokens_in": 32000,
+          "tokens_out": 0,
+          "runId": "9B_optimized",
+          "kvBits": 4,
+          "modelName": "9B"
+        },
+        {
+          "success": true,
+          "ttft_ms": 25761,
+          "tps": 0,
+          "duration_s": 510.366,
+          "mem_before": {
+            "rss_mb": 5408,
+            "swap_mb": 499,
+            "compressed_mb": 115,
+            "timestamp": "2026-03-31T03:13:17.878Z"
+          },
+          "mem_after": {
+            "rss_mb": 5417,
+            "swap_mb": 499,
+            "compressed_mb": 142,
+            "timestamp": "2026-03-31T03:21:48.324Z"
+          },
+          "tokens_in": 48000,
+          "tokens_out": 0,
+          "runId": "9B_optimized",
+          "kvBits": 4,
+          "modelName": "9B"
+        },
+        {
+          "success": true,
+          "ttft_ms": 25782,
+          "tps": 0,
+          "duration_s": 704.595,
+          "mem_before": {
+            "rss_mb": 5409,
+            "swap_mb": 499,
+            "compressed_mb": 139,
+            "timestamp": "2026-03-31T03:22:14.540Z"
+          },
+          "mem_after": {
+            "rss_mb": 5074,
+            "swap_mb": 499,
+            "compressed_mb": 238,
+            "timestamp": "2026-03-31T03:33:59.213Z"
+          },
+          "tokens_in": 64000,
+          "tokens_out": 0,
+          "runId": "9B_optimized",
+          "kvBits": 4,
+          "modelName": "9B"
+        },
+        {
+          "success": true,
+          "ttft_ms": 25812,
+          "tps": 0,
+          "duration_s": 922.461,
+          "mem_before": {
+            "rss_mb": 5407,
+            "swap_mb": 499,
+            "compressed_mb": 185,
+            "timestamp": "2026-03-31T03:34:25.519Z"
+          },
+          "mem_after": {
+            "rss_mb": 0,
+            "swap_mb": 525,
+            "compressed_mb": 271,
+            "timestamp": "2026-03-31T03:49:48.043Z"
+          },
+          "tokens_in": 96000,
+          "tokens_out": 0,
+          "runId": "9B_optimized",
+          "kvBits": 4,
+          "modelName": "9B"
+        },
+        {
+          "success": true,
+          "ttft_ms": 25872,
+          "tps": 0,
+          "duration_s": 921.526,
+          "mem_before": {
+            "rss_mb": 5407,
+            "swap_mb": 525,
+            "compressed_mb": 168,
+            "timestamp": "2026-03-31T03:50:14.277Z"
+          },
+          "mem_after": {
+            "rss_mb": 0,
+            "swap_mb": 525,
+            "compressed_mb": 289,
+            "timestamp": "2026-03-31T04:05:35.866Z"
+          },
+          "tokens_in": 128000,
+          "tokens_out": 0,
+          "runId": "9B_optimized",
+          "kvBits": 4,
+          "modelName": "9B"
+        }
+      ]
+    }
+  ],
+  "last_successful": {
+    "runId": "9B_optimized",
+    "tokens": 128000
+  }
+}

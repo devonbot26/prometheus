@@ -1,0 +1,22 @@
+{
+    "name": "hermes-agent",
+    "description": "Delegate complex reasoning or evolutionary tasks to the Hermes Agent sidecar.",
+    "tools": {
+        "delegate_to_hermes": {
+            "path": "index.js",
+            "function": "delegate_to_hermes",
+            "description": "Send a task to the Hermes Agent for deep analysis. Use this when the user explicitly asks for Hermes, or for tasks requiring evolutionary skill generation.",
+            "parameters": {
+                "task": { 
+                    "type": "string", 
+                    "description": "The task description to delegate to Hermes." 
+                },
+                "context": { 
+                    "type": "string", 
+                    "description": "Optional project context or file content to include." 
+                }
+            },
+            "required": ["task"]
+        }
+    }
+}

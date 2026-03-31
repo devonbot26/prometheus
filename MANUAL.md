@@ -41,12 +41,56 @@ Control whether the `<think>` block is visible in real-time streaming:
 Prometheus includes a specialized skill for interacting with real websites using Puppeteer.
 
 ### 1. Available Tools
-- `browser_open({ url })`: Launches a browser and navigates to the target site.
+- `browser_open({ url })`: Launches or attaches to a browser and navigates.
 - `browser_click({ selector })`: Clicks an element by CSS selector or text match.
 - `browser_type({ selector, text, pressEnter })`: Inputs text into fields.
-- `browser_screenshot({ fileName })`: Captures the current page view (saved to `data/screenshots/`).
-- `browser_extract_text({ selector })`: Retrieves visible text for analysis.
+- `browser_screenshot({ fileName })`: Captures the current page view.
+- `browser_extract_text({ selector })`: Retrieves visible text.
 - `browser_close()`: Terminate the session to free RAM.
+
+### 2. Browser Session Reuse (CDP Attachment)
+Prometheus can now attach to your **existing** browser session instead of launching a new one. This preserves your logins, history, and active tabs.
+
+**How to Enable:**
+1. Close all instances of Chrome/Arc.
+2. Launch from the terminal with the remote debugging port enabled:
+   ```bash
+   /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222
+   ```
+3. Prometheus will automatically detect the port and attach:
+   `[BROWSER] Found existing session. Attaching via CDP...`
+
+---
+
+## 🔍 AI-Native API Discovery (`discover_api`)
+
+Prometheus can "mine" a website to find its hidden JSON APIs. This is part of the "Teachable Agent" workflow, allowing the agent to learn how a site works without a public API.
+
+### 1. How it Works
+Using the `discover_api({ url })` tool, Prometheus:
+1. Navigates to the page.
+2. Intercepts all network traffic (XHR/Fetch).
+3. Condenses the traffic into a **Signature Map** (collapsing duplicates).
+4. Identifies unique JSON endpoints and their methods (`GET`, `POST`, etc.).
+
+### 2. Usage Case
+Ask Prometheus: *"Find the internal API used by the search bar on `https://example.com`."*
+The agent will return a list of identified endpoints, which can then be used by the `self-coder` to generate a dedicated, high-speed scraper skill.
+
+---
+
+## 🛠️ Universal Strategy Registry
+
+To optimize performance on local models (4B/9B), Prometheus uses a **Strategy-Aware** tool loader. 
+
+### 1. Strategy Types
+- **`UI`**: Requires a full browser and visual interaction (Slowest).
+- **`INTERCEPT`**: Uses network monitoring to discover or fulfill requests.
+- **`COOKIE`**: Uses direct HTTP requests with existing session cookies (Fastest).
+- **`NATIVE`**: Direct communication with macOS or the Swift Dashboard.
+
+### 2. Orchestration Benefit
+By tagging tools with strategies in `skill.json`, the Project Manager (Niki) can prioritize lightweight `COOKIE` or `INTERCEPT` methods over resource-heavy `UI` automation, significantly improving TTFT and reducing RAM usage.
 
 ---
 

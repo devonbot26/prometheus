@@ -1,6 +1,9 @@
 import { spawn } from 'child_process';
 import { prompt } from '../../core/llm.js';
 import { logDebug } from '../../core/logger.js';
+import fetch from 'node-fetch';
+import TurndownService from 'turndown';
+import * as cheerio from 'cheerio';
 import path from 'path';
 
 /**

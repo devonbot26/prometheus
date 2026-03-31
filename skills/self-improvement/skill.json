@@ -1,0 +1,111 @@
+{
+    "name": "self-improvement",
+    "id": "self-improvement",
+    "version": "1.0.0",
+    "description": "Allows Prometheus to audit its own performance, errors, and code quality to suggest and apply improvements.",
+    "tools": {
+        "audit_recent_errors": {
+            "path": "index.js",
+            "function": "audit_recent_errors",
+            "description": "Analyze recurring error patterns in logs/errors/ and suggest proactive fixes.",
+            "parameters": {
+                "limit": {
+                    "type": "number",
+                    "description": "Number of recent errors to analyze (default 10)",
+                    "required": false
+                }
+            }
+        },
+        "analyze_code_complexity": {
+            "path": "index.js",
+            "function": "analyze_code_complexity",
+            "description": "Scan a file for high complexity (long functions, file length) and suggest refactoring.",
+            "parameters": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to the file to analyze",
+                    "required": true
+                }
+            }
+        },
+        "generate_improvement_plan": {
+            "path": "index.js",
+            "function": "generate_improvement_plan",
+            "description": "Create a formal SELF_IMPROVEMENT_PLAN.md tracking proposed enhancements.",
+            "parameters": {
+                "findings": {
+                    "type": "string",
+                    "description": "The issues/suggestions found during auditing or analysis",
+                    "required": true
+                }
+            }
+        },
+        "cleanup_orphaned_processes": {
+            "path": "index.js",
+            "function": "cleanup_orphaned_processes",
+            "description": "Find and terminate orphaned Prometheus processes (prom.js, web_server.js, mlx_lm) that are running in the background.",
+            "parameters": {}
+        },
+        "generate_daily_report": {
+            "path": "index.js",
+            "function": "generate_daily_report",
+            "description": "Generate a summary report of all self-improvement activities from the last 24 hours.",
+            "parameters": {}
+        },
+        "view_improvement_logs": {
+            "path": "index.js",
+            "function": "view_improvement_logs",
+            "description": "Display the structured audit trail of self-improvement activities.",
+            "parameters": {
+                "limit": {
+                    "type": "number",
+                    "description": "Number of recent log entries to show (default 50)"
+                }
+            }
+        },
+        "run_performance_experiment": {
+            "path": "index.js",
+            "function": "run_performance_experiment",
+            "description": "Run an iterative performance test (A/B testing) to measure LLM TTFT and TPS, with automatic outlier rejection. Use this to validate configuration changes.",
+            "parameters": {
+                "prompt": {
+                    "type": "string",
+                    "description": "The test prompt to use for benchmarking.",
+                    "required": true
+                },
+                "iterations": {
+                    "type": "number",
+                    "description": "Number of times to run the test (default 10). Automatically rejects highest/lowest scores if >= 4.",
+                    "required": false
+                }
+            }
+        },
+        "log_improvement": {
+            "path": "index.js",
+            "function": "log_improvement",
+            "description": "Log a specific improvement attempt and its outcome (success/failure) for the audit trail.",
+            "parameters": {
+                "activity": {
+                    "type": "string",
+                    "description": "What was the improvement attempt? (e.g. 'Optimized weather logic')",
+                    "required": true
+                },
+                "success": {
+                    "type": "boolean",
+                    "description": "Was the improvement successful?",
+                    "required": true
+                },
+                "impact": {
+                    "type": "string",
+                    "description": "What changed? (e.g. 'Reduced latency by 200ms')",
+                    "required": true
+                },
+                "details": {
+                    "type": "string",
+                    "description": "Technical details, filenames, or error logs related to this attempt.",
+                    "required": false
+                }
+            }
+        }
+    }
+}

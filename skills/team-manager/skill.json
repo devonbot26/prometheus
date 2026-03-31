@@ -130,6 +130,21 @@
             "path": "index.js",
             "description": "Clears all persistent team state (handoffs, tasks, plans, and timers) for a clean session startup.",
             "parameters": {}
+        },
+        "import_flow": {
+            "path": "index.js",
+            "description": "Parses a Markdown file (.md) for a task list (starting with '- [ ]') and converts it into an active Prometheus Flow plan. Roles can be specified with **[RoleName]**.",
+            "parameters": {
+                "path": {
+                    "type": "string",
+                    "description": "The absolute path to the Markdown flow file."
+                }
+            }
+        },
+        "continue_flow": {
+            "path": "index.js",
+            "description": "Resumes the current mission from the next pending step. Use this to start an imported flow or to resume one that was interrupted.",
+            "parameters": {}
         }
     }
 }

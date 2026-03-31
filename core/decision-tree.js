@@ -97,6 +97,18 @@ export let INTENT_SCHEMA = {
     'git': {
         triggers: ['git log', 'git status', 'git diff', 'git show', 'local git'],
         context_hints: ['history', 'changes', 'commits', 'version control']
+    },
+    'self-improvement': {
+        triggers: ['audit', 'self-improvement', 'complexity', 'refactor', 'optimization', 'health audit'],
+        context_hints: ['patterns', 'errors', 'files', 'system', 'improvement']
+    },
+    'hermes-agent': {
+        triggers: ['investigate', 'deep analysis', 'generate a plan', 'evolutionary', 'hermes'],
+        context_hints: ['complex reasoning', 'improvement', 'skill architecture', 'bottleneck']
+    },
+    'lotto-checker': {
+        triggers: ['lotto', '6/49', 'winning numbers', 'lottery', 'draw results'],
+        context_hints: ['wclc', 'classic draw', 'gold ball', 'bonus number']
     }
 };
 

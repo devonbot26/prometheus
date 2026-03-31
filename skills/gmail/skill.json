@@ -81,6 +81,49 @@
                     "required": true
                 }
             }
+        },
+        "gmail_batch_modify": {
+            "path": "bridge.js",
+            "function": "gmail_batch_modify",
+            "description": "Batch modify messages (add/remove labels like UNREAD, INBOX)",
+            "parameters": {
+                "ids": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Array of message IDs",
+                    "required": true
+                },
+                "addLabelIds": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Labels to add",
+                    "required": false
+                },
+                "removeLabelIds": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Labels to remove",
+                    "required": false
+                }
+            }
+        },
+        "gmail_get_auth_url": {
+            "path": "bridge.js",
+            "function": "gmail_get_auth_url",
+            "description": "Generate the Google OAuth2 authorization URL for initial setup.",
+            "parameters": {}
+        },
+        "gmail_set_auth_code": {
+            "path": "bridge.js",
+            "function": "gmail_set_auth_code",
+            "description": "Exchange the Google authorization code for a persistent token.",
+            "parameters": {
+                "code": {
+                    "type": "string",
+                    "description": "The authorization code from Google",
+                    "required": true
+                }
+            }
         }
     }
 }

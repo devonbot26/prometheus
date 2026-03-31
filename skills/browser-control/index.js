@@ -7,17 +7,42 @@ let page = null;
 
 /**
  * Ensures a browser and page instance are available.
+ * Now supports CDP attachment to an existing browser session.
  */
 async function ensureSession() {
-    if (!browser) {
-        browser = await puppeteer.launch({
-            headless: false, // Set to false to see the 'Self-Evolution' in action
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
-        const pages = await browser.pages();
-        page = pages.length > 0 ? pages[0] : await browser.newPage();
-        await page.setViewport({ width: 1280, height: 800 });
+    if (browser) return { browser, page };
+
+    const CDP_URL = 'http://127.0.0.1:9222/json/version';
+    
+    try {
+        console.log(`[BROWSER] Checking for existing CDP session at ${CDP_URL}...`);
+        const response = await fetch(CDP_URL, { signal: AbortSignal.timeout(1000) });
+        if (response.ok) {
+            const data = await response.json();
+            const wsUrl = data.webSocketDebuggerUrl;
+            if (wsUrl) {
+                console.log(`[BROWSER] Found existing session. Attaching via CDP...`);
+                browser = await puppeteer.connect({ browserWSEndpoint: wsUrl });
+                const pages = await browser.pages();
+                page = pages.length > 0 ? pages[0] : await browser.newPage();
+                console.log(`[BROWSER] Attached successfully.`);
+                return { browser, page };
+            }
+        }
+    } catch (e) {
+        console.log(`[BROWSER] No existing CDP session found (or port 9222 closed).`);
     }
+
+    // Fallback: Launch new browser
+    console.log(`[BROWSER] Launching new managed instance...`);
+    browser = await puppeteer.launch({
+        headless: false,
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const pages = await browser.pages();
+    page = pages.length > 0 ? pages[0] : await browser.newPage();
+    await page.setViewport({ width: 1280, height: 800 });
+    
     return { browser, page };
 }
 

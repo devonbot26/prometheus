@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { Agent } from '../core/agent.js';
 
 async function verifyDevon() {

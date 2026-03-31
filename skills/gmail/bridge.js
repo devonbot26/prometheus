@@ -16,13 +16,27 @@ const TOKEN_PATH = path.join(process.cwd(), 'config', 'token.json');
  */
 export async function authorize() {
     try {
-        const content = await fs.readFile(CREDENTIALS_PATH);
+        let content;
+        try {
+            content = await fs.readFile(CREDENTIALS_PATH);
+        } catch (e) {
+            throw new Error(`[GMAIL] Missing ${CREDENTIALS_PATH}. Please follow the "credentials" setup first.`);
+        }
+
         const keys = JSON.parse(content);
         const key = keys.installed || keys.web;
+        if (!key) throw new Error('[GMAIL] Invalid credentials.json format (installed/web missing).');
+        
         const { client_secret, client_id, redirect_uris } = key;
         const oAuth2Client = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0]);
 
-        const tokenContent = await fs.readFile(TOKEN_PATH);
+        let tokenContent;
+        try {
+            tokenContent = await fs.readFile(TOKEN_PATH);
+        } catch (e) {
+            throw new Error(`[GMAIL] Needs authorization. Call gmail_get_auth_url first.`);
+        }
+
         const token = JSON.parse(tokenContent);
         oAuth2Client.setCredentials(token);
 
@@ -49,18 +63,25 @@ export async function authorize() {
  */
 function getBody(payload) {
     let body = "";
-    if (payload.parts) {
-        for (const part of payload.parts) {
-            if (part.mimeType === 'text/plain' && part.body.data) {
-                body += Buffer.from(part.body.data, 'base64').toString('utf-8');
-            } else if (part.parts) {
-                body += getBody(part);
+    let htmlBody = "";
+    
+    const extract = (p) => {
+        if (p.parts) {
+            for (const part of p.parts) {
+                extract(part);
+            }
+        } else if (p.body && p.body.data) {
+            const data = Buffer.from(p.body.data, 'base64').toString('utf-8');
+            if (p.mimeType === 'text/plain') {
+                body += data;
+            } else if (p.mimeType === 'text/html') {
+                htmlBody += data;
             }
         }
-    } else if (payload.body && payload.body.data) {
-        body = Buffer.from(payload.body.data, 'base64').toString('utf-8');
-    }
-    return body;
+    };
+    
+    extract(payload);
+    return (body.trim() || htmlBody.trim());
 }
 
 export async function gmail_scan(options = {}) {
@@ -82,8 +103,8 @@ export async function gmail_scan(options = {}) {
             return { success: true, count: 0, messages: [] };
         }
 
-        const details = [];
-        for (const msg of res.data.messages) {
+        // Fetch details in parallel
+        const details = await Promise.all(res.data.messages.map(async (msg) => {
             const m = await gmail.users.messages.get({
                 userId: 'me',
                 id: msg.id,
@@ -103,8 +124,8 @@ export async function gmail_scan(options = {}) {
                 messageObj.body = getBody(m.data.payload);
             }
 
-            details.push(messageObj);
-        }
+            return messageObj;
+        }));
 
         return { success: true, count: details.length, messages: details };
 
@@ -152,12 +173,17 @@ export async function gmail_compose(args) {
         const auth = await authorize();
         const gmail = google.gmail({ version: 'v1', auth });
 
-        // Encode the email
+        // Robust RFC 2822 formatting
+        const encodeHeader = (str) => {
+            if (/^[a-zA-Z0-9\s]*$/.test(str)) return str;
+            return `=?utf-8?B?${Buffer.from(str).toString('base64')}?=`;
+        };
+
         const messageParts = [
             `To: ${to}`,
             'Content-Type: text/plain; charset=utf-8',
             'MIME-Version: 1.0',
-            `Subject: ${subject}`,
+            `Subject: ${encodeHeader(subject)}`,
             ''
         ];
         
@@ -237,12 +263,17 @@ export async function gmail_reply(args) {
         const messageId = headers.find(h => h.name === 'Message-ID')?.value;
         const references = headers.find(h => h.name === 'References')?.value || '';
 
-        // 2. Compose the reply
+        // Robust RFC 2822 formatting for replies
+        const encodeHeader = (str) => {
+            if (/^[a-zA-Z0-9\s]*$/.test(str)) return str;
+            return `=?utf-8?B?${Buffer.from(str).toString('base64')}?=`;
+        };
+
         const message = [
             `To: ${from}`,
             'Content-Type: text/plain; charset=utf-8',
             'MIME-Version: 1.0',
-            `Subject: Re: ${subject}`,
+            `Subject: Re: ${encodeHeader(subject)}`,
             `In-Reply-To: ${messageId}`,
             `References: ${references} ${messageId}`.trim(),
             '',
@@ -266,6 +297,76 @@ export async function gmail_reply(args) {
         return { success: true, messageId: res.data.id, threadId: res.data.threadId };
     } catch (error) {
         logDebugError('Gmail Reply Error:', error.message);
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Batch modify messages (mark read/unread, archive, etc.)
+ */
+export async function gmail_batch_modify(args) {
+    const { ids, addLabelIds = [], removeLabelIds = [] } = args;
+    try {
+        const auth = await authorize();
+        const gmail = google.gmail({ version: 'v1', auth });
+
+        await gmail.users.messages.batchModify({
+            userId: 'me',
+            requestBody: {
+                ids,
+                addLabelIds,
+                removeLabelIds
+            }
+        });
+
+        return { success: true, count: ids.length };
+    } catch (error) {
+        logDebugError('Gmail Batch Modify Error:', error.message);
+        return { success: false, error: error.message };
+    }
+}
+/**
+ * Get the Google Authorization URL
+ */
+export async function gmail_get_auth_url() {
+    try {
+        const content = await fs.readFile(CREDENTIALS_PATH);
+        const keys = JSON.parse(content);
+        const key = keys.installed || keys.web;
+        const { client_secret, client_id, redirect_uris } = key;
+        const oAuth2Client = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0]);
+
+        const authUrl = oAuth2Client.generateAuthUrl({
+            access_type: 'offline',
+            scope: ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/gmail.modify'],
+            prompt: 'consent'
+        });
+
+        return { success: true, url: authUrl, message: "Please open this URL in your browser, authorize the app, and paste the code into gmail_set_auth_code." };
+    } catch (error) {
+        logDebugError('Gmail Get Auth URL Error:', error.message);
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Exchange auth code for token and save it
+ */
+export async function gmail_set_auth_code(args) {
+    const { code } = args;
+    try {
+        const content = await fs.readFile(CREDENTIALS_PATH);
+        const keys = JSON.parse(content);
+        const key = keys.installed || keys.web;
+        const { client_secret, client_id, redirect_uris } = key;
+        const oAuth2Client = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0]);
+
+        const { tokens } = await oAuth2Client.getToken(code);
+        await fs.writeFile(TOKEN_PATH, JSON.stringify(tokens));
+        
+        return { success: true, message: "Token saved successfully. Gmail skill is now ready to use." };
+    } catch (error) {
+        logDebugError('Gmail Set Auth Code Error:', error.message);
         return { success: false, error: error.message };
     }
 }

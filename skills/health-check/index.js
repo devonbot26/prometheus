@@ -3,114 +3,101 @@ import path from 'path';
 import { execSync } from 'child_process';
 import os from 'os';
 
+/**
+ * Perform a system health diagnosis to identify the root cause of an error.
+ */
 export async function diagnose_system_health(args) {
-    let errorId = args.error_id;
-    const suspectFile = args.suspect_file;
+    let { error_id: errorId, suspect_file: suspectFile } = args;
 
-    // 0. Resolve undefined error ID
+    // 1. Auto-resolve 'undefined' or missing Error ID
     if (!errorId || errorId === 'undefined') {
         try {
             const { errorManager } = await import('../../core/error-manager.js');
             const activeErrors = errorManager.listActiveErrors();
-            if (activeErrors.length > 0) {
-                // Extract code from "ERR-001: description"
-                errorId = activeErrors[activeErrors.length - 1].split(':')[0].trim();
-                console.log(`🔍 [HEALTH] Auto-resolved 'undefined' error ID to: ${errorId}`);
-            } else {
-                errorId = 'UNKNOWN_ERROR';
-            }
+            errorId = activeErrors.length > 0 ? activeErrors[activeErrors.length - 1].split(':')[0].trim() : 'UNKNOWN_SYSTEM_ERROR';
         } catch (e) {
-            errorId = 'ERR-LOAD-FAIL';
+            errorId = 'ERR_DIAG_FAIL';
         }
     }
 
-    let report = [];
-    report.push(`## 🏥 System Diagnosis Report for ${errorId}`);
-    report.push(`Timestamp: ${new Date().toISOString()}`);
+    let report = [`## 🏥 System Diagnosis: ${errorId}`, `Generated: ${new Date().toLocaleString()}`];
 
     try {
-        // 1. Memory Audit
+        // 2. Resource Audit (Memory)
+        const totalRAM = Math.round(os.totalmem() / 1024 / 1024 / 1024);
         const freeMB = Math.round(os.freemem() / 1024 / 1024);
-        report.push(`### Memory Audit`);
-        report.push(`- Free RAM: ${freeMB} MB`);
-        if (freeMB < 200) {
-            report.push(`- **WARNING**: Ultra-low memory detected. This may cause LLM hallucinations or truncation errors.`);
-        } else {
-            report.push(`- Status: Healthy`);
-        }
+        report.push(`### 📈 Resource Audit\n- **Free RAM**: ${freeMB} MB / ${totalRAM} GB`);
+        if (freeMB < 100) report.push(`- ⚠️ **CRITICAL**: Extremely low memory. Expect instability.`);
 
-        // 2. Syntax Audit (if applicable)
-        report.push(`### Syntax Audit`);
-        if (suspectFile && fs.existsSync(suspectFile)) {
-            try {
-                execSync(`node --check ${suspectFile}`);
-                report.push(`- \`${suspectFile}\`: Passed syntax check.`);
-            } catch (e) {
-                report.push(`- \`${suspectFile}\`: **SYNTAX ERROR DETECTED**`);
-                report.push(`  \`\`\`\n${e.message.split('\n')[0]}\n\`\`\``);
-                report.push(`- **Recommendation**: Use \`apply_patch\` to fix the syntax error.`);
+        // 3. Syntax Audit (The most common cause of "Dead-End" loops)
+        if (suspectFile) {
+            report.push(`### 🛠️ Syntax Audit: \`${path.basename(suspectFile)}\``);
+            if (fs.existsSync(suspectFile)) {
+                try {
+                    execSync(`node --check ${suspectFile}`);
+                    report.push(`- ✅ Status: Passed syntax check.`);
+                } catch (e) {
+                    const firstLine = e.message.split('\n').find(l => l.includes('Error:')) || 'Syntax Error';
+                    report.push(`- ❌ **SYNTAX ERROR**: \`${firstLine}\``);
+                    report.push(`- **Action**: Fix this file immediately using \`replace_file_content\`.`);
+                }
+            } else {
+                report.push(`- ⚠️ Error: File not found at ${suspectFile}`);
             }
-        } else if (suspectFile) {
-            report.push(`- File not found: ${suspectFile}`);
-        } else {
-            report.push(`- Skipped (No suspect file provided)`);
         }
 
-        // 3. Process Audit
-        report.push(`### Process Audit`);
+        // 4. Process Audit (Check for port conflicts or zombies)
+        report.push(`### ⚙️ Process Audit`);
         try {
-            const lsof = execSync('lsof -i -P -n | grep node | head -n 5').toString();
-            report.push(`- Active Node Connections:\n\`\`\`\n${lsof}\n\`\`\``);
-        } catch (e) {
-            report.push(`- No active external node connections found.`);
-        }
+            const nodeProcs = execSync("ps aux | grep 'node' | grep -v 'grep' | wc -l").toString().trim();
+            report.push(`- **Active Node Instances**: ${nodeProcs}`);
+            const ports = execSync("lsof -i -P -n | grep LISTEN | grep -E '3000|18888'").toString().trim();
+            report.push(ports ? `- **Open Ports (3000/18888)**:\n\`\`\`\n${ports}\n\`\`\`` : "- ✅ Ports 3000 and 18888 are clean.");
+        } catch (e) { /* silent skip */ }
 
-        // 4. Healing State Audit (Dead-End Loop Prevention)
-        report.push(`### Loop Prevention Check`);
+        // 5. Loop Prevention & Handoff
         const STATE_FILE = path.join(process.cwd(), 'data', 'HEALING_STATE.json');
-        let healingState = {};
-        if (fs.existsSync(STATE_FILE)) {
-            healingState = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
-        }
-
+        let healingState = fs.existsSync(STATE_FILE) ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')) : {};
+        
         const now = Date.now();
         const lastAttempt = healingState[errorId] || 0;
-        const secondsSinceLast = (now - lastAttempt) / 1000;
-        const minutesSinceLast = secondsSinceLast / 60;
+        const minutesSinceLast = (now - lastAttempt) / 60000;
 
+        report.push(`### 🛡️ Decision Tree`);
         if (lastAttempt > 0 && minutesSinceLast < 5) {
-            report.push(`- 🔴 **CRITICAL**: Attempted to heal ${errorId} just ${minutesSinceLast.toFixed(1)} minutes ago.`);
-            report.push(`- **Decision**: DEAD-END LOOP DETECTED. DO NOT ATTEMPT TO AUTO-FIX. You must generate SYMPTOMS.md and hand off to the Human.`);
-
-            generateSymptomsMd(errorId, "Dead-end loop detected on auto-heal.", report.join('\n\n'));
+            report.push(`- 🛑 **LOOP DETECTED**: This error was touched ${minutesSinceLast.toFixed(1)}m ago.`);
+            report.push(`- **Final Decision**: DO NOT AUTO-FIX. Handing off to human.`);
+            generateSymptomsMd(errorId, "Recursive auto-heal loop detected.", report.join('\n\n'));
+            return report.join('\n\n') + "\n\n❌ **CRITICAL FAILURE**: Loop detected. I have generated `SYMPTOMS.md` for the human. **Stop work now.**";
         } else {
-            report.push(`- 🟢 Safe to proceed: No recent fails for this error (${lastAttempt === 0 ? 'First attempt' : minutesSinceLast.toFixed(1) + 'm ago'}).`);
             healingState[errorId] = now;
             fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
             fs.writeFileSync(STATE_FILE, JSON.stringify(healingState, null, 2));
+            report.push(`- ✅ **Status**: Safe to proceed. No recent recursion detected.`);
+            return report.join('\n\n') + "\n\n✅ **System Health Diagnosis Complete.** You are clear to attempt a fix.";
         }
 
-        return report.join('\n\n');
-
     } catch (error) {
-        return `Failed to complete health diagnosis: ${error.message}`;
+        return `❌ **Diagnostic Failure**: ${error.message}`;
     }
 }
 
 function generateSymptomsMd(errorId, reason, debugLog) {
-    const SYMPTOMS_PATH = path.join(process.cwd(), 'SYMPTOMS.md');
-    const content = `# System Hand-off required
+    const content = `# 🚨 System Hand-off: ${errorId}
 ## Context
-Prometheus hit a critical issue and auto-healing was either disabled or detected a loop.
+Prometheus has detected a recursive loop or critical failure that requires human intervention.
 
-**Error ID**: ${errorId}
 **Reason**: ${reason}
 
 ## Recommended Human Action
-Please review the system logs and source files related to this error.
+1. Review the diagnostic data below.
+2. Check for hidden syntax errors in the suspected files.
+3. Restart the Prometheus supervisor if necessary.
 
 ## Diagnostic Data
 ${debugLog}
+---
+*Generated by Health-Check Skill*
 `;
-    fs.writeFileSync(SYMPTOMS_PATH, content);
+    fs.writeFileSync(path.join(process.cwd(), 'SYMPTOMS.md'), content);
 }

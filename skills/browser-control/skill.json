@@ -7,6 +7,7 @@
             "path": "index.js",
             "function": "browser_open",
             "description": "Opens a Chrome instance and navigates to the URL. If a browser is already open, it reuses the session.",
+            "strategy": "UI",
             "parameters": {
                 "url": {
                     "type": "string",
@@ -19,6 +20,7 @@
             "path": "index.js",
             "function": "browser_click",
             "description": "Clicks an element on the current page. Supports CSS selectors or exact text matches.",
+            "strategy": "UI",
             "parameters": {
                 "selector": {
                     "type": "string",
@@ -31,6 +33,7 @@
             "path": "index.js",
             "function": "browser_type",
             "description": "Types text into a specified input field.",
+            "strategy": "UI",
             "parameters": {
                 "selector": {
                     "type": "string",
@@ -53,6 +56,7 @@
             "path": "index.js",
             "function": "browser_wait",
             "description": "Pauses execution until a selector appears or a timeout is reached.",
+            "strategy": "UI",
             "parameters": {
                 "selector": {
                     "type": "string",
@@ -70,6 +74,7 @@
             "path": "index.js",
             "function": "browser_screenshot",
             "description": "Takes a screenshot of the current browser page and saves it to data/screenshots/.",
+            "strategy": "UI",
             "parameters": {
                 "fileName": {
                     "type": "string",
@@ -82,6 +87,7 @@
             "path": "index.js",
             "function": "browser_extract_text",
             "description": "Extracts the visible text from the page or a specific element.",
+            "strategy": "UI",
             "parameters": {
                 "selector": {
                     "type": "string",
@@ -94,6 +100,7 @@
             "path": "index.js",
             "function": "browser_close",
             "description": "Closes the current browser session and releases memory.",
+            "strategy": "UI",
             "parameters": {}
         }
     }
