@@ -1,0 +1,20 @@
+{
+    "name": "python-sandbox",
+    "id": "python-sandbox",
+    "version": "1.0.0",
+    "description": "Safe Python Evaluation Tool — Execute transient Python code for data analysis or calculations.",
+    "tools": {
+        "python_run": {
+            "path": "index.js",
+            "function": "python_run",
+            "description": "Execute Python code in a secure sandbox. Use this for complex math, data manipulation, or logic verification. Restricted modules (os, subprocess, etc.) are blocked.",
+            "parameters": {
+                "code": {
+                    "type": "string",
+                    "description": "The Python code to execute (e.g. 'print(sum(range(100)))')",
+                    "required": true
+                }
+            }
+        }
+    }
+}

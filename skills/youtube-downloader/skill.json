@@ -22,6 +22,7 @@
   "timeout": 600,
   "tools": {
     "download_youtube_mp3": {
+      "path": "index.js",
       "description": "CRITICAL: You MUST use this tool instead of `terminal_run` for downloading YouTube videos. Downloads audio from a YouTube video or playlist URL and converts it to a 320kbps MP3 file. Handles long playlists safely with background heartbeats. The file is saved persistently in the downloads folder.",
       "parameters": {
         "url": {
@@ -40,6 +41,7 @@
       "required": ["url"]
     },
     "search_and_download_mp3": {
+      "path": "index.js",
       "description": "Searches for a song by artist and/or song name (supports English and Traditional Chinese), identifies the best match (e.g., official audio/high quality), downloads it, and converts it to a 320kbps MP3.",
       "parameters": {
         "query": {
@@ -54,6 +56,7 @@
       "required": ["query"]
     },
     "organize_library": {
+      "path": "index.js",
       "description": "Scans the existing music library, applies 'Clever Rename' to all files, and resolve duplicates by keeping the highest quality version. Useful for fixing messy filename formats and cleaning up the collection.",
       "parameters": {
         "directory": {
@@ -63,6 +66,7 @@
       }
     },
     "split_youtube_into_songs": {
+      "path": "index.js",
       "description": "Downloads a long YouTube 'mix' video and automatically splits it into individual high-quality MP3 tracks based on video chapters or timestamps. Ideal for hour-long mixes with 20+ songs.",
       "parameters": {
         "url": {

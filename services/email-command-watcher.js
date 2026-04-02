@@ -41,26 +41,20 @@ export class EmailWatcher {
     }
 
     start() {
-        console.log('📧 [EMAIL WATCHER] Service started. Polling every 15 minutes.');
-        // Initial poll after 5s
-        setTimeout(() => this.poll(), 5000);
-        this.timer = setInterval(() => this.poll(), this.interval);
+        console.log('📧 [EMAIL WATCHER] Service ready (Sync via Tick Loop).');
+        // No internal timers; poll() is called by core/tick-loop.js
     }
 
     stop() {
-        if (this.timer) clearInterval(this.timer);
+        // No timers to clear
     }
 
     async poll() {
         try {
-            // Phase 18: Resource Optimization - Only poll between 6 AM and 11 PM
-            const hour = new Date().getHours();
-            if (hour < 6 || hour >= 23) {
-                console.log('📧 [EMAIL WATCHER] Outside active hours (6 AM - 11 PM). Skipping poll to free overnight resources.');
-                return;
-            }
+            // Priority: TickLoop handles resource optimization and idle windows.
+            // No internal window check here anymore.
 
-            if (this.agent.isBusy && this.agent.isBusy()) {
+            if (this.agent.processing) {
                 console.log('📧 [EMAIL WATCHER] Agent is engaged in a task. Skipping cycle.');
                 return;
             }

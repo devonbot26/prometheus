@@ -20,7 +20,7 @@ if (!process.env.LLM_MODEL || !process.env.LLM_MODEL_HEAVY) {
 
 // 2. Verify ROLE_MODEL_MAP in agent.js
 console.log('\n🧠 Checking ROLE_MODEL_MAP in agent.js:');
-const rolesToTest = ['team-architect', 'team-coder', 'team-manager', 'team-assistant'];
+const rolesToTest = ['team-architect', 'team-coder', 'team-manager', 'devon'];
 
 for (const role of rolesToTest) {
     const config = ROLE_MODEL_MAP[role];

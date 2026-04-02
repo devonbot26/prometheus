@@ -14,6 +14,7 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { execSync } from 'child_process';
 import { Agent, ROLE_MODEL_MAP } from '../core/agent.js';
+import { TickLoop } from '../core/tick-loop.js';
 import { mcpManager } from '../core/mcp-client.js';
 import { EmailWatcher } from '../services/email-command-watcher.js';
 import { memoryManager } from '../core/memory-manager.js';
@@ -137,14 +138,18 @@ global.io = io; // Expose globally for IPC handlers
 app.use(express.static(PUBLIC_DIR));
 app.use(express.json());
 
-// Start Autonomous Services
+// Start Autonomous Services via Tick Loop Orchestrator
 const emailWatcher = new EmailWatcher(agent, io);
-emailWatcher.start();
-
 const selfReflection = new SelfReflection(agent, io);
-selfReflection.start();
 
-// Initialize background cron jobs
+const tickLoop = new TickLoop(agent, io, {
+    email: emailWatcher,
+    reflection: selfReflection,
+    indexer: projectIndexer
+});
+tickLoop.start();
+
+// Initialize background cron jobs (Legacy)
 initCronJobs(agent, (output) => {
     io.emit('agent_output', { text: output });
 });
@@ -524,6 +529,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('message', async (data) => {
+        agent.lastActivityAt = Date.now();
         sendHeartbeat();
         const text = typeof data === 'string' ? data : data.text;
         const draftMode = typeof data === 'object' ? data.draftMode : false;
@@ -609,6 +615,17 @@ io.on('connection', (socket) => {
         if (newConfig.DOCUMENTS_ROOT) process.env.DOCUMENTS_ROOT = newConfig.DOCUMENTS_ROOT;
         fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(userConfig, null, 2));
         io.emit('config_info', userConfig);
+    });
+
+    socket.on('update_gen_config', (config) => {
+        console.log('⚙️ [WEB] Received Gen Config Update:', JSON.stringify(config));
+        if (process.send) {
+            process.send({ type: 'update_gen_config', config });
+        }
+        // Update local agent instance state
+        if (agent) {
+            agent.generationConfig = { ...agent.generationConfig, ...config };
+        }
     });
  
     socket.on('refresh_resources', async () => {

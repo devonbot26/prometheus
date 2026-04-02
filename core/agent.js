@@ -26,8 +26,10 @@ import { mcpManager } from './mcp-client.js';
 import { QUOTA_TIERS, quotaManager } from './quota-manager.js';
 import { memoryManager } from './memory-manager.js';
 import { StreamWatchdog } from './loop-watchdog.js';
+import { PRIORITY } from './model-controller.js';
 
 logDebug('[DEBUG] Loading core/agent.js...');
+
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -36,10 +38,10 @@ function getFreeMemMB() {
         if (os.platform() === 'darwin') {
             const output = execSync('vm_stat').toString();
             const pageSize = 16384; 
-            const free = parseInt(output.match(/Pages free:\s+(\d+)/)[1]);
-            const inactive = parseInt(output.match(/Pages inactive:\s+(\d+)/)[1]);
-            const speculative = parseInt(output.match(/Pages speculative:\s+(\d+)/)[1]);
-            const purgeable = parseInt(output.match(/Pages purgeable:\s+(\d+)/)[1]);
+            const free = parseInt(output.match(/Pages free:\s+(\d+)/)?.[1] || 0);
+            const inactive = parseInt(output.match(/Pages inactive:\s+(\d+)/)?.[1] || 0);
+            const speculative = parseInt(output.match(/Pages speculative:\s+(\d+)/)?.[1] || 0);
+            const purgeable = parseInt(output.match(/Pages purgeable:\s+(\d+)/)?.[1] || 0);
             return Math.floor(((free + inactive + speculative + purgeable) * pageSize) / (1024 * 1024));
         }
         return Math.floor(os.freemem() / (1024 * 1024));
@@ -55,12 +57,13 @@ const PLAN_CONTEXT_PATH = path.join(__dirname, '.plan_context.json');
 import { EventEmitter } from 'events';
 
 export const ROLE_MODEL_MAP = {
-    'team-architect': { modelId: process.env.LLM_MODEL_HEAVY || process.env.LLM_MODEL, forceLocal: true, maxTokens: 4096 },
-    'team-coder': { modelId: process.env.LLM_MODEL_HEAVY || process.env.LLM_MODEL, forceLocal: true, maxTokens: 4096 },
-    'team-designer': { modelId: process.env.LLM_MODEL_HEAVY || process.env.LLM_MODEL, forceLocal: true, maxTokens: 4096 },
-    'team-qa': { modelId: process.env.LLM_MODEL_HEAVY || process.env.LLM_MODEL, forceLocal: true, maxTokens: 4096 },
-    'team-researcher': { modelId: process.env.LLM_MODEL_HEAVY || process.env.LLM_MODEL, forceLocal: true, maxTokens: 4096 },
-    'team-manager': { modelId: process.env.LLM_MODEL_HEAVY || process.env.LLM_MODEL, forceLocal: true, deepThinking: true, maxTokens: 4096 }
+    'team-architect': { modelId: process.env.LLM_MODEL_HEAVY, forceLocal: true, maxTokens: parseInt(process.env.CTX_LIMIT_9B) || 16384, deepThinking: true },
+    'team-coder': { modelId: process.env.LLM_MODEL_HEAVY, forceLocal: true, maxTokens: parseInt(process.env.CTX_LIMIT_9B) || 16384 },
+    'team-designer': { modelId: process.env.LLM_MODEL, forceLocal: true, maxTokens: parseInt(process.env.CTX_LIMIT_9B) || 16384 },
+    'team-qa': { modelId: process.env.LLM_MODEL, forceLocal: true, maxTokens: parseInt(process.env.CTX_LIMIT_9B) || 16384 },
+    'team-researcher': { modelId: process.env.LLM_MODEL, forceLocal: true, maxTokens: parseInt(process.env.CTX_LIMIT_9B) || 16384 },
+    'team-manager': { modelId: process.env.LLM_MODEL_HEAVY, forceLocal: true, deepThinking: true, maxTokens: parseInt(process.env.CTX_LIMIT_9B) || 16384 },
+    'devon': { modelId: process.env.LLM_MODEL, forceLocal: true, maxTokens: parseInt(process.env.CTX_LIMIT_9B) || 16384 }
 };
 
 export class Agent extends EventEmitter {
@@ -76,11 +79,19 @@ export class Agent extends EventEmitter {
         this.activeNotebook = null;
         this.memoryState = 'healthy';
         this.taskStartedAt = null;
+        this.isDelegatedByManager = false;
         this.showThinking = process.env.SHOW_THINKING !== 'false';
         this.disabledSkills = new Set();
 
         this.config = {
             self_healing: process.env.SELF_HEALING_ENABLED !== 'false'
+        };
+
+        this.generationConfig = {
+            maxTokens: 4096,
+            temperature: 0.0,
+            topP: 1.0,
+            watchdogThreshold: 5000
         };
 
         this.processing = false;
@@ -96,6 +107,7 @@ export class Agent extends EventEmitter {
         this.clearState();
         this.progressState = ""; // Pinned task progress for context preservation
         this.watchdog = new StreamWatchdog();
+        this.lastActivityAt = Date.now();
     }
 
     /**
@@ -118,7 +130,7 @@ export class Agent extends EventEmitter {
     }
 
     setMode(mode) {
-        const STATIC_MODES = ['primary', 'plan', 'build', 'chat'];
+        const STATIC_MODES = ['primary', 'plan', 'build', 'chat', 'devon'];
         if (STATIC_MODES.includes(mode) || mode.startsWith('team-')) {
             this.activeMode = mode;
             this.saveAgentState();
@@ -133,6 +145,15 @@ export class Agent extends EventEmitter {
                 this.saveAgentState();
                 return;
             }
+        }
+
+        // Handle delegation tracking
+        const oldMode = this.activeMode;
+        if (oldMode === 'team-manager' && mode !== 'team-manager') {
+            this.isDelegatedByManager = true;
+            console.log(`✨ [DELEGATION] Manager (Niki) delegated task to ${mode}. Maintaining 9B model privileges.`);
+        } else if (mode === 'team-manager') {
+            this.isDelegatedByManager = false;
         }
 
         this.activeMode = mode;
@@ -237,6 +258,157 @@ export class Agent extends EventEmitter {
     }
 
     /**
+     * Internal helper to prepare the messages array for LLM calls.
+     * Enforces context budgets, history pruning, and local model compatibility.
+     */
+    _prepareMessages(systemPrompt, options = {}, userMessage = "") {
+        const freeMem = getFreeMemMB();
+        const ultraLowMem = freeMem < 1000;
+        const lowMem = freeMem < 2000;
+
+        // 1. Convert any history system messages to user (Local model compatibility)
+        let cleanedHistory = this.history.map(msg =>
+            msg.role === 'system' ? { role: 'user', content: `[SYSTEM MESSAGE]\n${msg.content}` } : msg
+        );
+
+        // 2. Hallucination Strip: Strip "hallucinated" limitations from history to break failure loops
+        cleanedHistory = cleanedHistory.filter(msg => {
+            if (msg.role !== 'assistant') return true;
+            const denials = ["i cannot", "don't have", "do not have", "lack the capability"];
+            const contentLower = msg.content.toLowerCase();
+            if (denials.some(d => contentLower.includes(d))) {
+                const toolList = Array.from(this.skills.values()).flatMap(s => s.toolNames);
+                const skillList = Array.from(this.skills.keys());
+                const isDenyingKnownTool = toolList.some(t => {
+                    const words = t.split('_');
+                    return words.some(w => w.length > 3 && contentLower.includes(w));
+                });
+                const isDenyingKnownSkill = skillList.some(s => contentLower.includes(s.toLowerCase()));
+                if (isDenyingKnownTool || isDenyingKnownSkill || contentLower.includes("youtube") || contentLower.includes("gmail")) {
+                    return false;
+                }
+            }
+            return true;
+        });
+
+        const messages = [];
+        const isGreeting = userMessage ? /^(hi|hello|hey|greetings|morning|afternoon|evening)(\s|$)/i.test(userMessage) : false;
+        const isUtility = options.fast || false;
+
+        // 3. Cache Buster: If KV Quantization is active, force a fresh prefix to avoid MLX batching errors
+        let patchedSystemPrompt = systemPrompt;
+        if (process.env.KV_BITS && process.env.KV_BITS !== '0') {
+            const busterId = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+            patchedSystemPrompt = `<!-- session_sync: ${busterId} -->\n${systemPrompt}`;
+            logDebug(`[DEBUG] MLX Cache Buster active. ID: ${busterId}`);
+        }
+
+        // 4. Dynamic Context Budgeting
+        const effectiveCtxLimit = parseInt(process.env.CTX_LIMIT_9B || '16384');
+        
+        const historyBudgetTokens = effectiveCtxLimit - 8192;
+        const avgMsgTokens = 800; 
+        const maxHistoryMsgs = Math.max(2, Math.min(Math.floor(historyBudgetTokens / avgMsgTokens), 15));
+
+        if (ultraLowMem) {
+            messages.push({ role: 'system', content: patchedSystemPrompt });
+            if (userMessage) messages.push({ role: 'user', content: userMessage });
+            logDebug(`[DEBUG] History wiped for ultra-low memory stateless mode.`);
+        } else if (isGreeting || isUtility) {
+            const recentHistory = cleanedHistory.slice(-8);
+            const hasHighValueContext = recentHistory.some(m => 
+                m.role === 'system' || 
+                m.content.includes('<execute>') || 
+                m.content.includes('### Progress') ||
+                m.content.length > 800
+            );
+            
+            if (hasHighValueContext) {
+                messages.push({ role: 'system', content: patchedSystemPrompt });
+                messages.push(...cleanedHistory.slice(-maxHistoryMsgs));
+            } else {
+                const historyLimit = -3;
+                messages.push({ role: 'system', content: patchedSystemPrompt });
+                messages.push(...cleanedHistory.slice(historyLimit));
+            }
+        } else {
+            messages.push({ role: 'system', content: patchedSystemPrompt });
+            messages.push(...cleanedHistory.slice(-maxHistoryMsgs));
+            logDebug(`[DEBUG] History capped at ${maxHistoryMsgs} messages (budget: ${historyBudgetTokens} tokens).`);
+        }
+
+        // 5. 4-Layer Compaction
+        return this.compactContext(messages, effectiveCtxLimit);
+    }
+
+    /**
+     * Progressive Context Compaction (Ref: Claude Code Leak Analysis)
+     * @param {Array} messages 
+     * @param {number} limit 
+     */
+    compactContext(messages, limit) {
+        let totalTokens = JSON.stringify(messages).length / 4; // Rough heuristic
+        if (totalTokens < limit * 0.8) return messages;
+
+        console.log(`🧹 [COMPACTION] Context pressure detected (${Math.round(totalTokens)}/${limit}). Running 4-Layer thinning...`);
+
+        // Layer 1: Format Strip (Remove JSON whitespace and meta)
+        messages = messages.map(m => ({
+            ...m,
+            content: m.content.replace(/\s+/g, ' ').trim()
+        }));
+
+        totalTokens = JSON.stringify(messages).length / 4;
+        if (totalTokens < limit * 0.8) return messages;
+
+        // Layer 2: Thought Summarizer (Condense <think> blocks)
+        messages = messages.map(m => {
+            if (m.role === 'assistant' && m.content.includes('<think>')) {
+                return {
+                    ...m,
+                    content: m.content.replace(/<think>[\s\S]*?<\/think>/g, (match) => {
+                        const len = match.length;
+                        return `\n[Summarized Thought: ${Math.round(len/4)} tokens of reasoning bypassed for efficiency]\n`;
+                    })
+                };
+            }
+            return m;
+        });
+
+        totalTokens = JSON.stringify(messages).length / 4;
+        if (totalTokens < limit * 0.8) return messages;
+
+        // Layer 3: Topic Archival (Move old turns to disk)
+        if (messages.length > 5) {
+            const archiveCount = Math.floor(messages.length / 2);
+            const toArchive = messages.slice(1, archiveCount); // Keep system prompt
+            const archiveId = `session_${Date.now()}`;
+            const topicPath = path.join(__dirname, '..', 'logs', 'topics', `${archiveId}.md`);
+            
+            try {
+                if (!fs.existsSync(path.dirname(topicPath))) fs.mkdirSync(path.dirname(topicPath), { recursive: true });
+                const archiveContent = toArchive.map(m => `### ${m.role.toUpperCase()}\n${m.content}`).join('\n\n');
+                fs.writeFileSync(topicPath, archiveContent);
+                
+                messages = [
+                    messages[0], // System
+                    { role: 'user', content: `[CONTEXT ARCHIVED: ${archiveCount} messages moved to ${topicPath}. Prior turns included work on project structure and history.]` },
+                    ...messages.slice(archiveCount)
+                ];
+            } catch (e) {
+                console.error('⚠️ [COMPACTION] Layer 3 Archival failed:', e.message);
+            }
+        }
+
+        totalTokens = JSON.stringify(messages).length / 4;
+        if (totalTokens < limit * 0.8) return messages;
+
+        // Layer 4: Hard Drop
+        console.log('⚠️ [COMPACTION] Layer 4: Hard message drop required.');
+        return [messages[0], ...messages.slice(-5)];
+    }
+
+    /**
      * Interrupts the currently active process and tool execution loop.
      */
     stop() {
@@ -269,9 +441,11 @@ export class Agent extends EventEmitter {
 
     saveHistory() {
         try {
-            fs.writeFileSync(HISTORY_PATH, JSON.stringify(this.history, null, 2));
+            const tmpPath = `${HISTORY_PATH}.tmp`;
+            fs.writeFileSync(tmpPath, JSON.stringify(this.history, null, 2));
+            fs.renameSync(tmpPath, HISTORY_PATH);
         } catch (e) {
-            console.error('⚠️ Failed to save history:', e.message);
+            console.error('⚠️ Failed to save history atomic:', e.message);
         }
     }
 
@@ -436,8 +610,8 @@ export class Agent extends EventEmitter {
         // GEP Gene: Persistent Base Skills for Team Roles
         // DEPRECATED: Forcing base skills adds 13KB+ of bloat, killing TTFT.
         // We now rely solely on resolveIntent (Decision Tree v3) for tool discovery.
-        if (this.activeMode === 'team-coder' && !detectedSkills.includes('terminal')) {
-            detectedSkills.push('terminal'); // Only Devon keeps terminal by default for safety
+        if (this.activeMode === 'devon' && !detectedSkills.includes('terminal')) {
+            detectedSkills.push('terminal'); // Devon is the primary all-rounder; she keeps terminal by default
         }
 
         if (detectedSkills.length > 0) {
@@ -465,6 +639,7 @@ export class Agent extends EventEmitter {
      */
     async process(userMessage, tier = QUOTA_TIERS.INTERACTIVE, streamCallback = null) {
         this.taskStartedAt = Date.now();
+        this.lastActivityAt = Date.now();
         console.log(`\n⏱️  [T1] Agent Processing Start [${this.activeMode}]`);
         console.log(`\n\n🚨 [DEBUG] process() CALLED! activeMode=${this.activeMode} tier=${tier}\n\n`);
 
@@ -477,43 +652,41 @@ export class Agent extends EventEmitter {
         // Cancel any pending background summarization to prevent LLM lock contention
         this.cancelSummarize();
 
-        this.processing = true;
-        this.abortController = new AbortController();
-        this.metrics = {
-            startTime: Date.now(),
-            completionTokens: 0,
-            promptTokens: 0,
-            totalGenTime: 0,
-            totalWeightedTps: 0,
-            steps: 0,
-            firstTtft: 0
-        };
+        try {
+            this.processing = true;
+            this.abortController = new AbortController();
+            this.metrics = {
+                startTime: Date.now(),
+                completionTokens: 0,
+                promptTokens: 0,
+                totalGenTime: 0,
+                totalWeightedTps: 0,
+                steps: 0,
+                firstTtft: 0
+            };
 
-        // Quota Guard Check
-        if (!quotaManager.allow(tier)) {
-            const status = quotaManager.getStatus();
-            let msg = "⚠️ [QUOTA GUARD] Request denied.";
-            if (status.safeMode) {
-                msg += ` Safe Mode active (Backing off 429). Retry in ${status.safeModeRemaining}s.`;
-            } else {
-                msg += ` Automated limit reached (${status.automatedCount}/${status.limit}).`;
+            // Quota Guard Check
+            if (!quotaManager.allow(tier)) {
+                const status = quotaManager.getStatus();
+                let msg = "⚠️ [QUOTA GUARD] Request denied.";
+                if (status.safeMode) {
+                    msg += ` Safe Mode active (Backing off 429). Retry in ${status.safeModeRemaining}s.`;
+                } else {
+                    msg += ` Automated limit reached (${status.automatedCount}/${status.limit}).`;
+                }
+                console.warn(msg);
+                this.emit('log', msg);
+                throw new Error("QUOTA_EXCEEDED");
             }
-            console.warn(msg);
-            this.emit('log', msg);
-            throw new Error("QUOTA_EXCEEDED");
-        }
 
-        quotaManager.recordRequest(tier);
-
-        this.processing = true;
+            quotaManager.recordRequest(tier);
 
         let autoContinueFlag = false;
         let sanitizationMetadata = { raw: '', strips: [] };
         let deepThinking = false;
         let assistantText = '';
 
-        try {
-            let isSimpleGreeting = false;
+        let isSimpleGreeting = false;
             let isUtility = false;
             const startTime = Date.now();
             let cleanMessage = userMessage; 
@@ -548,13 +721,13 @@ export class Agent extends EventEmitter {
                 this.setMode('team-manager');
                 cleanMessage = userMessage.replace(/^niki[,:\s]*/i, '').trim();
             } else if (lowerMsg.startsWith('devon')) {
-                console.log(`🧠 [ROUTING] Explicit Devon prefix detected. Switching to 'team-coder' mode.`);
-                this.setMode('team-coder');
+                console.log(`🧠 [ROUTING] Explicit Devon prefix detected. Switching to 'devon' mode.`);
+                this.setMode('devon');
                 cleanMessage = userMessage.replace(/^devon[,:\s]*/i, '').trim();
-            } else if (this.activeMode === 'primary') {
-                // Default to Devon (team-coder) if in primary mode and no prefix
-                console.log(`🧠 [ROUTING] No prefix detected in primary mode. Defaulting to 'team-coder' (Devon).`);
-                this.setMode('team-coder');
+            } else if (this.activeMode === 'primary' || this.activeMode === 'team-coder') {
+                // Default to Devon (assistant) if in primary/coder mode and no prefix
+                console.log(`🧠 [ROUTING] No prefix detected. Defaulting to 'devon' (Assistant).`);
+                this.setMode('devon');
             }
 
             // Phase 49: Utility Routing Override (Bypass Niki for Assistant tasks)
@@ -562,7 +735,7 @@ export class Agent extends EventEmitter {
             
             if (isUtilityRequest && this.activeMode === 'team-manager' && !lowerMsg.startsWith('niki')) {
                 console.log(`🧠 [ROUTING] Utility request detected ("${lowerMsg}"). Overriding Niki to Devon.`);
-                this.setMode('team-coder');
+                this.setMode('devon');
             }
 
             const isPrivate = this.isPrivateRequest(cleanMessage) || !!this.activeNotebook;
@@ -606,9 +779,9 @@ export class Agent extends EventEmitter {
             // Phase 5: Early Utility Detection for Routing & Pruning
             isUtility = /\b(gmail|email|weather|search)\b/i.test(lowerMsg);
 
-            // Phase 50: Low-Latency Routing (Route simple greetings to 2B)
+            // Phase 50: Low-Latency Routing (Standard Greeting)
             if (isSimpleGreeting && !deepThinking) {
-                console.log(`⚡ [ROUTING] Simple greeting detected. Will use Fast 4B model.`);
+                console.log(`⚡ [ROUTING] Simple greeting detected. Using baseline 9B model.`);
             }
 
             // AUTO-MODE DETECTION (Secondary check for keywords if in primary)
@@ -650,9 +823,12 @@ export class Agent extends EventEmitter {
             } else if (this.activeMode === 'team-manager') {
                 dynamicTools = getToolDescriptionsForSkills(this.skills, ['team-manager', 'opencode', ...ASSISTANT_SKILLS]) + '\n' + detectionInjection;
                 console.log('🎯 [PM MODE] Tool isolation active. Niki can see management, opencode, and assistant tools + detected skills.');
+            } else if (this.activeMode === 'devon') {
+                dynamicTools = detectionInjection;
+                console.log('🎯 [DEVON MODE] Full skill set active for standalone assistant.');
             } else if (this.activeMode.startsWith('team-')) {
-                // DELEGATION RULE: Only Niki (team-manager) can delegate. Devon (team-coder) works directly.
-                if (this.activeMode === 'team-coder' || this.activeMode === 'team-qa') {
+                // DELEGATION RULE: Only Niki (team-manager) can delegate. Sub-agents use direct skills.
+                if (this.activeMode === 'team-qa') {
                     console.log(`🎯 [DIRECT MODE] Using only detected/relevant skills for ${this.activeMode}.`);
                     dynamicTools = detectionInjection;
                 } else {
@@ -670,10 +846,9 @@ export class Agent extends EventEmitter {
                 basePrompt = buildSystemPrompt("You are operating in a specialized team role. You have FULL ACCESS to the tools listed below under 'AVAILABLE TOOLS' and you should use them proactively to fulfill the request.");
             }
             
-            // Inject Reasoning Prompt for 4B model
-            const is4B = (process.env.LLM_MODEL && process.env.LLM_MODEL.includes('4B'));
-            if (is4B && process.env.LLM_REASONING_PROMPT) {
-                console.log('🧠 Injecting optimized reasoning prompt for 4B model.');
+            // Inject Reasoning Prompt for specialized models (Placeholder)
+            if (process.env.LLM_REASONING_PROMPT && false) {
+                console.log('🧠 Injecting reasoning prompt.');
                 basePrompt = `${process.env.LLM_REASONING_PROMPT}\n\n${basePrompt}`;
             }
 
@@ -720,12 +895,21 @@ You are **PROMETHEUS**, a highly advanced agentic AI orchestrator.
                 finalPrompt = `## 📌 CURRENT PROGRESS (Pinned State):\n${this.progressState}\n\n` + finalPrompt;
             }
 
-            // Step 1: Stateful Memory Injection (PM_STATE.json)
+            // Step 1: Devon Standalone Prompt Injection
+            if (this.activeMode === 'devon') {
+                const devonPromptPath = path.join(__dirname, '..', 'prompts/devon.md');
+                if (fs.existsSync(devonPromptPath)) {
+                    const devonPrompt = fs.readFileSync(devonPromptPath, 'utf-8');
+                    finalPrompt = devonPrompt + '\n\n' + finalPrompt;
+                }
+            }
+
+            // Step 1b: Stateful Memory Injection (PM_STATE.json) for team roles
             if (this.activeMode.startsWith('team-')) {
                 const roleName = this.activeMode.replace('team-', '');
                 let teamPrompt = this.getTeamRolePrompt(roleName);
                 
-                // Devon's identity is now fully defined in prompts/team-coder.md
+                // Team role prompts are loaded from prompts/team-*.md
                 
                 finalPrompt = teamPrompt + '\n\n' + finalPrompt;
 
@@ -829,82 +1013,7 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
             }
             logDebug('[DEBUG] Notebook context injection complete.');
 
-            const messages = [];
-
-            // MLX Server rejects multiple system messages; convert any history system messages to user
-            let cleanedHistory = this.history.map(msg =>
-                msg.role === 'system' ? { role: 'user', content: `[SYSTEM MESSAGE]\n${msg.content}` } : msg
-            );
-
-            // SPECIAL 9B PATCH: Strip "hallucinated" limitations from history to break failure loops
-            cleanedHistory = cleanedHistory.filter(msg => {
-                if (msg.role !== 'assistant') return true;
-                
-                const denials = ["i cannot", "don't have", "do not have", "lack the capability"];
-                const contentLower = msg.content.toLowerCase();
-                
-                // If the assistant claims it can't do something that we KNOW it has a tool for, strip it.
-                if (denials.some(d => contentLower.includes(d))) {
-                    const toolList = Array.from(this.skills.values()).flatMap(s => s.toolNames);
-                    const skillList = Array.from(this.skills.keys());
-                    
-                    const isDenyingKnownTool = toolList.some(t => {
-                        const words = t.split('_');
-                        return words.some(w => w.length > 3 && contentLower.includes(w));
-                    });
-                    const isDenyingKnownSkill = skillList.some(s => contentLower.includes(s.toLowerCase()));
-                    
-                    if (isDenyingKnownTool || isDenyingKnownSkill || contentLower.includes("youtube") || contentLower.includes("gmail")) {
-                        console.log(`🧹 [HALLUCINATION STRIP] Removed assistant denial from context-history: "${msg.content.substring(0, 50)}..."`);
-                        return false;
-                    }
-                }
-                return true;
-            });
-
-
-
-            // INJECT HISTORY (with pruning for simple greetings to avoid sticking to old instructions)
-            const isGreeting = /^(hi|hello|hey|greetings|morning|afternoon|evening)(\s|$)/i.test(cleanMessage);
-
-            // Context-Aware History Budget (Phase 60: M1 16GB Optimization)
-            // Detect if the fast 4B model will actually be used (utility/greeting routing overrides is9B)
-            const isComplexForRouting = /\b(audit|analyze|complex|benchmark|fix|implement|deep|code)\b/i.test(lowerMsg);
-            const willUse4B = (isUtility && !isComplexForRouting && this.activeMode !== 'team-manager') || (isSimpleGreeting && !deepThinking);
-            const effectiveCtxLimit = willUse4B
-                ? parseInt(process.env.CTX_LIMIT_4B || '32768')
-                : parseInt(process.env.CTX_LIMIT_9B || '16384');
-            // Reserve 8k tokens for system prompt + tools + output headroom
-            const historyBudgetTokens = effectiveCtxLimit - 8192;
-            const avgMsgTokens = 800; // Conservative estimate per history message
-            const maxHistoryMsgs = Math.max(2, Math.min(Math.floor(historyBudgetTokens / avgMsgTokens), 20));
-
-            if (ultraLowMem) {
-                messages.push({ role: 'system', content: finalPrompt });
-                messages.push({ role: 'user', content: cleanMessage });
-                logDebug(`[DEBUG] History wiped for ultra-low memory stateless mode.`);
-            } else if (isGreeting || isUtility) {
-                // Phase 61: Tool-aware pruning for utility tasks
-                // If the last few messages contain a tool result, we MUST keep it for follow-ups
-                const recentHistory = cleanedHistory.slice(-6);
-                const hasToolResult = recentHistory.some(m => m.role === 'system' || m.content.includes('<execute>'));
-                
-                if (hasToolResult) {
-                    messages.push({ role: 'system', content: finalPrompt });
-                    messages.push(...cleanedHistory.slice(-maxHistoryMsgs));
-                    logDebug(`[DEBUG] Utility context expanded to ${maxHistoryMsgs} due to recent tool activity.`);
-                } else {
-                    const historyLimit = -2;
-                    messages.push({ role: 'system', content: finalPrompt });
-                    messages.push(...cleanedHistory.slice(historyLimit));
-                    logDebug(`[DEBUG] History pruned for ${isUtility ? 'utility' : 'greeting'} focus. Limit: ${historyLimit}`);
-                }
-            } else {
-                // Phase 60: Dynamic context budget based on model + hardware limits
-                messages.push({ role: 'system', content: finalPrompt });
-                messages.push(...cleanedHistory.slice(-maxHistoryMsgs));
-                logDebug(`[DEBUG] History capped at ${maxHistoryMsgs} messages (budget: ${historyBudgetTokens} tokens, model: ${willUse4B ? '4B' : '9B'}, ctx: ${effectiveCtxLimit}).`);
-            }
+            // Phase 4: Prepare Messages for LLM (MOVED BELOW Phase 5 for chatOptions access)
             logDebug('[DEBUG] Messages array prepared for LLM call.');
 
             // CRITICAL DEBUG: Help me see why 9B model 'hallucinates' lack of tools
@@ -919,7 +1028,7 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
 
             const HANDOFF_PATH = path.join(__dirname, '..', 'HANDOFF.json');
 
-            // Ensure sub-agents default back to 4B unless /think was provided on this specific request
+            // Ensure sub-agents default back to baseline reasoning unless /think was provided
             let forceDeepThinking = roleConfig.deepThinking || deepThinking;
 
             // Force 9B for team-manager (Niki)
@@ -1072,10 +1181,15 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
             };
 
             const chatOptions = {
+                jobName: `interactive-${this.activeMode}`,
+                priority: PRIORITY.HIGH,
                 forceLocal: isPrivate || !!this.activeNotebook,
                 deepThinking: forceDeepThinking,
                 fast: isSimpleGreeting && !deepThinking, // Fix 8: Route greetings to fast model
-                maxTokens: ultraLowMem ? 512 : 4096,
+                maxTokens: this.generationConfig.maxTokens || (ultraLowMem ? 512 : 4096),
+                temperature: this.generationConfig.temperature ?? 0.0,
+                topP: this.generationConfig.topP ?? 1.0,
+                watchdogThreshold: this.generationConfig.watchdogThreshold,
                 adapterPath: this.getAdapterPath(),
                 onToken: watchdogCallback,
                 watchdog: this.watchdog,
@@ -1096,23 +1210,33 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
                 Object.assign(chatOptions, roleConfig);
             }
 
-            // Phase 5: Error-Driven Auto-Escalation & Utility Routing
+            // Phase 5: Error-Driven Auto-Escalation & Utility Routing (Role Restricted)
+            const canAutoEscalate = this.activeMode === 'team-manager' || this.isDelegatedByManager;
             const lastMsgContent = this.history.findLast(m => m.role === 'assistant')?.content || '';
             const isErrorLoop = lastMsgContent.includes('"error":');
 
             const isComplexUtility = /\b(audit|analyze|complex|benchmark|fix|implement|deep|code)\b/i.test(lowerMsg);
+            
             if (isUtility && !isErrorLoop && !deepThinking && this.activeMode !== 'team-manager' && !isComplexUtility) {
-                console.log(`⚡ [ROUTING] Utility request detected. Forcing fast 4B model.`);
+                console.log(`⚡ [ROUTING] Utility request detected. Using baseline reasoning model.`);
                 chatOptions.modelId = process.env.LLM_MODEL;
                 chatOptions.fast = true;
                 chatOptions.deepThinking = false;
             } 
-            // Force 9B if there's an error to self-heal, or if explicitly asked/escalated
-            else if (isErrorLoop || deepThinking || this.loopEscalationActive) {
-                console.log(`🚀 [ROUTING] Escalating to heavy 9B model (reason: ${isErrorLoop ? 'Error' : deepThinking ? 'Explicit' : 'Loop'}).`);
+            // Force 9B if there's an error to self-heal, or if explicitly asked/escalated - ONLY for Manager or Delegated
+            else if (canAutoEscalate && (isErrorLoop || deepThinking || this.loopEscalationActive)) {
+                console.log(`🚀 [ROUTING] Escalating to heavy 9B model (reason: ${isErrorLoop ? 'Error' : deepThinking ? 'Explicit' : 'Loop'}). Role: ${this.activeMode}`);
                 chatOptions.modelId = process.env.LLM_MODEL_HEAVY;
                 chatOptions.deepThinking = true;
+            } else if (!canAutoEscalate && (isErrorLoop || this.loopEscalationActive)) {
+                // Devon is struggling but NOT allowed to auto-escalate
+                console.log(`⚠️  [ROUTING] ${this.activeMode} is struggling. Suggesting Niki engage for better reasoning.`);
+                this.emit('log', `⚠️  ${this.activeMode} is struggling with this task. Suggesting Niki (Architect) engage for better reasoning depth.`);
             }
+
+            // Phase 4: Prepare Messages for LLM (Budgeted and Pruned)
+            const messages = this._prepareMessages(finalPrompt, chatOptions, cleanMessage);
+            logDebug('[DEBUG] Messages array prepared for LLM call.');
 
             // Get LLM response
             console.log(`\n🤖 [T2] Turn ${this.metrics.steps + 1} - Model Request Start...`);
@@ -1434,10 +1558,8 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
                             this.history.push({ role: 'assistant', content: assistantText });
                             this.history.push({ role: 'user', content: toolResultMsg });
 
-                            const followUp = await chat([
-                                { role: 'system', content: finalPrompt },
-                                ...this.history.map(msg => msg.role === 'system' ? { role: 'user', content: `[SYSTEM MESSAGE]\n${msg.content}` } : msg)
-                            ], { ...chatOptions, deepThinking: forceDeepThinking });
+                            const messages = this._prepareMessages(finalPrompt, chatOptions);
+                            const followUp = await chat(messages, { ...chatOptions, deepThinking: forceDeepThinking });
 
                             assistantText = followUp.text;
                             finalTps = followUp.tps;
@@ -1548,11 +1670,11 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
                                     if (chatOptions.fast) {
                                         const freeMem = os.freemem() / (1024 * 1024);
                                         if (freeMem > 6000) {
-                                            console.log(`     🚀 [ESCALATION] Tool "${toolCall.tool}" returned error while on 4B. Escalating to 9B (${Math.round(freeMem)}MB free).`);
+                                            console.log(`     🚀 [RECOVERY] Tool "${toolCall.tool}" returned error. Retrying with heavy reasoning (${Math.round(freeMem)}MB free).`);
                                             chatOptions.modelId = process.env.LLM_MODEL_HEAVY;
                                             chatOptions.fast = false;
                                         } else {
-                                            console.log(`     ⚠️ [ESCALATION BLOCKED] Insufficient RAM (${Math.round(freeMem)}MB). Staying on 4B.`);
+                                            console.log(`     ⚠️ [RECOVERY BLOCKED] Insufficient RAM (${Math.round(freeMem)}MB).`);
                                         }
                                     }
                             }
@@ -1607,10 +1729,8 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
                             this.history.push({ role: 'assistant', content: assistantText });
                             this.history.push({ role: 'user', content: toolResultMsg });
 
-                            const followUp = await chat([
-                                { role: 'system', content: finalPrompt },
-                                ...this.history.map(msg => msg.role === 'system' ? { role: 'user', content: `[SYSTEM MESSAGE]\n${msg.content}` } : msg)
-                            ], { ...chatOptions, deepThinking: forceDeepThinking });
+                            const messages = this._prepareMessages(finalPrompt, chatOptions);
+                            const followUp = await chat(messages, { ...chatOptions, deepThinking: forceDeepThinking });
 
                             // Track follow-up quota
                             if (followUp.usage) {
@@ -1678,7 +1798,7 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
                             if (chatOptions.fast) {
                                 const freeMem = os.freemem() / (1024 * 1024);
                                 if (freeMem > 6000) {
-                                    console.log(`     🚀 [ESCALATION] Tool "${toolCall.tool}" threw error while on 4B. Escalating to 9B (${Math.round(freeMem)}MB free).`);
+                                    console.log(`     🚀 [RECOVERY] Tool "${toolCall.tool}" threw error. Retrying with heavy reasoning (${Math.round(freeMem)}MB free).`);
                                     chatOptions.modelId = process.env.LLM_MODEL_HEAVY;
                                     chatOptions.fast = false;
                                 } else {
@@ -1686,10 +1806,8 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
                                 }
                             }
 
-                            const followUp = await chat([
-                                { role: 'system', content: finalPrompt },
-                                ...this.history.map(msg => msg.role === 'system' ? { role: 'user', content: `[SYSTEM MESSAGE]\n${msg.content}` } : msg)
-                            ], { ...chatOptions, deepThinking: forceDeepThinking });
+                            const messages = this._prepareMessages(finalPrompt, chatOptions);
+                            const followUp = await chat(messages, { ...chatOptions, deepThinking: forceDeepThinking });
 
                             if (followUp.usage) {
                                 quotaTracker.deduct(followUp.usage.total_tokens);
@@ -1739,7 +1857,9 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
 
             // Memory Optimization: Truncate very large tool results in history
             // Phase 60: Model-aware truncation — 9B gets tighter limits to stay within context budget
-            const maxMsgChars = is9B ? 1500 : 3000;
+            // Memory Optimization: Truncate very large tool results in history
+            // Phase 60: Model-aware truncation — 9B gets tighter limits to stay within context budget
+            const maxMsgChars = is9B ? 12000 : 8000;
             this.history = this.history.map(item => {
                 if (item.content.length > maxMsgChars) {
                     return { ...item, content: item.content.slice(0, maxMsgChars) + '... [Content truncated for memory]' };
@@ -1757,42 +1877,15 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
             // Background History Pruning (Phase 61: Lazy Execution)
             // We emit the message FIRST, then summarize LATER to avoid lock contention.
             const runBackgroundSummarize = async () => {
-                try {
-                    const summarizeThreshold = is9B ? 8 : 20;
-                    if (this.history.length > summarizeThreshold) {
-                        const goal = this.history.slice(0, 2);
-                        const middle = this.history.slice(2, -4);
-                        const recent = this.history.slice(-4);
-                        
-                        if (middle.length > 2) {
-                            this.emit('log', '🧠 [MEMORY] Tidying up conversation history for faster response...');
-                            console.log(`🧠 [SUMMARIZER] Compressing ${middle.length} turns of history...`);
-                            const middleText = middle.map(m => `[${m.role.toUpperCase()}]: ${m.content.substring(0, 200)}`).join('\n');
-                            const summary = await this.summarizeText(`Summarize the work done and current state described in these turns briefly:\n${middleText}`);
-                            
-                            this.history = [
-                                ...goal,
-                                { role: 'system', content: `## 📜 HISTORICAL CONTEXT SUMMARY:\n${summary}` },
-                                ...recent
-                            ];
-                            logDebug(`🧠 [CONTEXT] Stateful compression applied in background.`);
-                        } else {
-                            this.history = [...goal, ...recent];
-                        }
-                        this.saveHistory();
-                    }
-                } catch (e) {
-                    console.error('🧠 [SUMMARIZER] Background error:', e.message);
-                } finally {
-                    this.processing = false;
-                    this.abortController = null;
-                }
+                await this.summarizeHistory(is9B);
+                this.processing = false;
+                this.abortController = null;
             };
 
             if (autoContinueFlag) {
-                console.log('🧹 Clearing history for autonomous handoff...');
+                console.log('🔄 Autonomous Step: Persisting history for context continuity.');
                 this.savePlanContext();
-                this.history = [];
+                // History is NO LONGER wiped here. Rely on windowed pruning and background summarization.
             }
 
             // Phase 7: Forced Agent Auto-Return (Structural Safety Net)
@@ -1877,10 +1970,9 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
                 auto_continue: autoContinueFlag,
                 performance: performance
             };
-        } catch (error) {
+        } finally {
             this.processing = false;
             this.abortController = null;
-            throw error;
         }
     }
 
@@ -2125,15 +2217,53 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
     }
 
     /**
+     * Summarize technical history into a stateful context block
+     * @param {boolean} is9B Whether we are using a larger model tier
+     */
+    async summarizeHistory(is9B) {
+        try {
+            const summarizeThreshold = is9B ? 8 : 15;
+            if (this.history.length > summarizeThreshold) {
+                const goal = this.history.slice(0, 2);
+                const middle = this.history.slice(2, -5);
+                const recent = this.history.slice(-5);
+                
+                if (middle.length > 2) {
+                    this.emit('log', '🧠 [MEMORY] Compressing conversation history...');
+                    console.log(`🧠 [SUMMARIZER] Compressing ${middle.length} turns of history...`);
+                    const middleText = middle.map(m => `[${m.role.toUpperCase()}]: ${m.content.substring(0, 150)}`).join('\n');
+                    const summary = await this.summarizeText(`Summarize the technical tasks, tool outputs, and decisions in these turns extremely briefly for a follow-up AI agent:\n${middleText}`);
+                    
+                    this.history = [
+                        ...goal,
+                        { role: 'system', content: `## 📜 HISTORICAL CONTEXT SUMMARY (Compressed):\n${summary}` },
+                        ...recent
+                    ];
+                    logDebug(`🧠 [CONTEXT] History compressed successfully.`);
+                    this.saveHistory();
+                }
+            }
+        } catch (e) {
+            console.error('🧠 [SUMMARIZER] Error:', e.message);
+        }
+    }
+
+    /**
      * Internal helper to summarize text using the local LLM
      */
     async summarizeText(text) {
         try {
             const { chat } = await import('./llm.js');
             const response = await chat([
-                { role: 'system', content: 'You are a summarization utility. Be extremely concise.' },
+                { role: 'system', content: 'You are a technical summarization utility. Be extremely concise. Focus only on facts, outcomes, and current state.' },
                 { role: 'user', content: text }
-            ], { forceLocal: true, maxTokens: 256, signal: AbortSignal.timeout(60000) });
+            ], { 
+                jobName: 'background-summarizer',
+                priority: PRIORITY.LOW,
+                forceLocal: true, 
+                maxTokens: 300, 
+                signal: AbortSignal.timeout(60000) 
+            });
             return response.text;
         } catch (e) {
             return `[Summary failed: ${e.message}]`;

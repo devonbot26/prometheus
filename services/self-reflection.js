@@ -15,18 +15,12 @@ export class SelfReflection {
     }
 
     start() {
-        console.log('🤖 Self-Reflection service active (interval: 12h)');
-        // Initial reflection after 1 minute
-        setTimeout(() => this.reflect(), 60000);
-        // Periodic reflection
-        this.timer = setInterval(() => this.reflect(), this.interval);
-
-        // Morning Briefing Check (every hour)
-        setInterval(() => this.checkMorningBriefing(), 3600000);
+        console.log('🤖 Self-Reflection service active (Sync via Tick Loop)');
+        // Periodic tasks moved to core/tick-loop.js
     }
 
     stop() {
-        if (this.timer) clearInterval(this.timer);
+        // No timers to clear
     }
 
     /**

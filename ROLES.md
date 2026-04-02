@@ -1,42 +1,39 @@
 # Prometheus Role Definitions & Priority Tiers
 
-This project uses a tiered multi-agent system to balance model power with local execution speed.
-All role personas are defined in the `prompts/` directory and can be edited via the **Team Hub** in the Dashboard.
-
-## 🔴 Tier 1: Primary Coding (OpenCode)
-**Model**: Configurable (MiniMax M2.5 free)
-**Role**: `team-opencode`
-**Objective**: Default agent for ALL coding tasks, including new features, refactors, and architecture. OpenCode operates in an external sandbox with rich IDE context and high-power models.
-
-## 🟡 Tier 2: Personal AI Assistant (Devon)
-**Model**: Qwen 3.5 9B (Local)
-**Role**: `team-coder`
-**Objective**: The primary personal assistant for Nelson Wong. Devon manages email, weather, research, and general queries. She also acts as a failover for system maintenance.
-
-## 🟢 Tier 3: Autonomous PM (Niki)
-**Model**: Qwen 3.5 9B (Local)
-**Role**: `team-manager`
-**Objective**: The project conductor. Niki builds plans and delegates to the team. Once a plan is confirmed, she works autonomously until all tasks are completed.
+## 🟣 Devon — Personal Assistant (Standalone)
+**Model**: **Qwen 3.5 4B (Fast)** | **Context**: 32,768 tokens
+**NOT a team member**. Devon is Nelson's direct personal assistant. She handles all general tasks: email, research, weather, terminal, file management.
+- **Handoff Rule**: Devon does NOT auto-handoff. If she struggles, she suggests Nelson ask Niki.
+- **Patience Window**: 5 minutes (Universal).
 
 ---
 
-### [Role Matrix]
+## 🟢 Tier 1: Management & Architecture (Niki)
+**Model**: **Qwen 3.5 9B (Smart)** | **Context**: 16,384 tokens
+**Roles**: `team-manager`, `team-architect`
+**Objective**: Plan coordination, state management, and delegation.
 
-| Name | Role Key | Persona File | Model | Ownership |
+## 🔵 Tier 2: Expert Execution (9B)
+**Model**: **Qwen 3.5 9B (Smart)** | **Context**: 16,384 tokens
+**Roles**: `team-coder`
+**Objective**: Deep coding and architecture. Runs on the SAME 9B model as Niki to avoid model-switching overhead.
+
+## 🟡 Tier 3: Utility (4B)
+**Model**: **Qwen 3.5 4B (Fast)** | **Context**: 4,096 tokens
+**Roles**: `team-designer`, `team-qa`, `team-researcher`
+
+---
+
+### Model Authority Matrix
+
+| Name | Role Key | Model | Context | Authority |
 |:---|:---|:---|:---|:---|
-| **Niki** | `team-manager` | `prompts/team-manager.md` | Qwen 3.5 9B | `HANDOFF.json`, `TEAM_TASKS.md` |
-| **OpenCode** | `team-opencode` | `prompts/team-opencode.md` | MiniMax M2.5 | Primary Coding, Logic, UI |
-| **Devon** | `team-coder` | `prompts/team-coder.md` | Qwen 3.5 9B | `Prometheus Core`, `Skills`, `Failover` |
-| **Architect** | `team-architect` | `prompts/team-architect.md` | Qwen 3.5 9B | `Architecture`, `Design Docs` |
-| **Designer** | `team-designer` | `prompts/team-designer.md` | Qwen 3.5 9B | `SwiftUI`, `HUD`, `CSS` |
-| **QA** | `team-qa` | `prompts/team-qa.md` | Qwen 3.5 9B | `Verification`, `Audit` |
-| **Researcher** | `team-researcher` | `prompts/team-researcher.md` | Qwen 3.5 9B | `Research`, `Knowledge Base` |
+| **Devon** | `devon` | **4B** | **32k** | Standalone assistant. Suggests Niki if stuck. |
+| **Niki** | `team-manager` | **9B** | **16k** | Full authority. Can auto-escalate. |
+| **Architect** | `team-architect` | **9B** | **16k** | System design and planning. |
+| **Expert Coder** | `team-coder` | **9B** | **16k** | Deep coding (delegated by Niki). |
+| **Designer** | `team-designer` | **4B** | **4k** | UI/UX implementation. |
+| **QA** | `team-qa` | **4B** | **4k** | Verification and audits. |
 
 ---
-
-### Adding New Roles
-
-Niki can create **JIT (Just-In-Time)** roles by writing a new persona file to `prompts/team-[name].md` before delegating with `handoff_to`. The `getValidRoles()` function dynamically discovers new roles from this directory.
-
----
-*For detailed model routing and benchmark data, see [MODELS.md](file:///Users/nelsonwong/Documents/projects/Prometheus/MODELS.md).*
+*Last Updated: March 2026 (Standalone Devon & 9B Coder Update)*

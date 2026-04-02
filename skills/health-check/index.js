@@ -25,9 +25,34 @@ export async function diagnose_system_health(args) {
     try {
         // 2. Resource Audit (Memory)
         const totalRAM = Math.round(os.totalmem() / 1024 / 1024 / 1024);
-        const freeMB = Math.round(os.freemem() / 1024 / 1024);
-        report.push(`### 📈 Resource Audit\n- **Free RAM**: ${freeMB} MB / ${totalRAM} GB`);
-        if (freeMB < 100) report.push(`- ⚠️ **CRITICAL**: Extremely low memory. Expect instability.`);
+        let availableMB;
+        let swapInfo = "N/A";
+
+        if (os.platform() === 'darwin') {
+            try {
+                const vmStat = execSync('vm_stat').toString();
+                const pageSize = 16384; // 16KB for M1/M2/M3
+                const free = parseInt(vmStat.match(/Pages free:\s+(\d+)/)?.[1] || 0);
+                const inactive = parseInt(vmStat.match(/Pages inactive:\s+(\d+)/)?.[1] || 0);
+                const speculative = parseInt(vmStat.match(/Pages speculative:\s+(\d+)/)?.[1] || 0);
+                const purgeable = parseInt(vmStat.match(/Pages purgeable:\s+(\d+)/)?.[1] || 0);
+                
+                availableMB = Math.floor(((free + inactive + speculative + purgeable) * pageSize) / (1024 * 1024));
+                
+                const swap = execSync('sysctl vm.swapusage').toString();
+                swapInfo = swap.match(/used = ([\d\.]+M)/)?.[1] || "0M";
+            } catch (e) {
+                availableMB = Math.round(os.freemem() / 1024 / 1024);
+            }
+        } else {
+            availableMB = Math.round(os.freemem() / 1024 / 1024);
+        }
+
+        report.push(`### 📈 Resource Audit\n- **Available RAM**: ${availableMB} MB / ${totalRAM} GB (Activity Monitor Match)`);
+        report.push(`- **Swap Used**: ${swapInfo}`);
+        
+        if (availableMB < 500) report.push(`- ⚠️ **WARNING**: Low available memory. Page swapping may occur.`);
+        if (availableMB < 100) report.push(`- 🚨 **CRITICAL**: Extremely low memory. Expect instability.`);
 
         // 3. Syntax Audit (The most common cause of "Dead-End" loops)
         if (suspectFile) {
@@ -64,18 +89,27 @@ export async function diagnose_system_health(args) {
         const minutesSinceLast = (now - lastAttempt) / 60000;
 
         report.push(`### 🛡️ Decision Tree`);
+        const isSwapping = swapInfo !== "0M" && swapInfo !== "N/A";
+        
+        let finalStatus = "";
         if (lastAttempt > 0 && minutesSinceLast < 5) {
             report.push(`- 🛑 **LOOP DETECTED**: This error was touched ${minutesSinceLast.toFixed(1)}m ago.`);
             report.push(`- **Final Decision**: DO NOT AUTO-FIX. Handing off to human.`);
             generateSymptomsMd(errorId, "Recursive auto-heal loop detected.", report.join('\n\n'));
-            return report.join('\n\n') + "\n\n❌ **CRITICAL FAILURE**: Loop detected. I have generated `SYMPTOMS.md` for the human. **Stop work now.**";
+            finalStatus = "\n\n❌ **CRITICAL FAILURE**: Loop detected. I have generated `SYMPTOMS.md` for the human. **Stop work now.**";
         } else {
             healingState[errorId] = now;
             fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
             fs.writeFileSync(STATE_FILE, JSON.stringify(healingState, null, 2));
             report.push(`- ✅ **Status**: Safe to proceed. No recent recursion detected.`);
-            return report.join('\n\n') + "\n\n✅ **System Health Diagnosis Complete.** You are clear to attempt a fix.";
+            finalStatus = "\n\n✅ **System Health Diagnosis Complete.** You are clear to attempt a fix.";
         }
+
+        if (isSwapping) {
+            finalStatus += `\n\n> [!CAUTION]\n> **SYSTEM IS SWAPPING (${swapInfo})**: Disk I/O is slow. Increase your internal patience for tool calls and model loading. Do not assume a timeout is a crash.`;
+        }
+
+        return report.join('\n\n') + finalStatus;
 
     } catch (error) {
         return `❌ **Diagnostic Failure**: ${error.message}`;

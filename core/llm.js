@@ -1,6 +1,8 @@
+import { withLock } from './llm_lock.js';
+import { modelController } from './model-controller.js';
 import { logDebug, logDebugError } from './logger.js';
 import { StreamWatchdog } from './loop-watchdog.js';
-import { withLock } from './llm_lock.js';
+
 /**
  * Prometheus LLM Interface
  * Routes requests to Gemini (cloud) or Qwen (local) based on availability.
@@ -22,7 +24,7 @@ async function isPortAvailable(port) {
 }
 const GEMINI_MODEL = 'gemini-2.0-flash';
 
-const LOCAL_MODEL_DEFAULT = process.env.LLM_MODEL || 'Jackrong/MLX-Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-v2-4bit';
+const LOCAL_MODEL_DEFAULT = process.env.LLM_MODEL || 'Jackrong/MLX-Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-4bit';
 const LOCAL_MODEL_HEAVY  = process.env.LLM_MODEL_HEAVY || 'Jackrong/MLX-Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-4bit';
 
 /**
@@ -161,8 +163,7 @@ async function callLocalStreaming(messages, options = {}, targetModelOverride = 
         reqBody.adapters = options.adapterPath;
     }
 
-    const isHeavyModel = targetModel === process.env.LLM_MODEL_HEAVY || targetModel.toLowerCase().includes('9b') || targetModel.toLowerCase().includes('14b');
-    const ttftSeconds = isHeavyModel ? 120 : 60;
+    const ttftSeconds = 300; // Universal 5-minute 'Patience Window' for all models (Swap-friendly)
     let ttftTimeout = setTimeout(() => {
         if (!firstTokenTime) {
             console.error(`🚨 [TIMEOUT] TTFT Watchdog triggered! No tokens after ${ttftSeconds}s. Aborting server connection.`);
@@ -195,13 +196,14 @@ async function callLocalStreaming(messages, options = {}, targetModelOverride = 
     let reasoningOut = '';
     let streamDone = false;
     let completionTokens = 0;
-    const watchdog = options.watchdog || new StreamWatchdog();
+    const watchdog = options.watchdog || new StreamWatchdog({ stallTokenThreshold: options.watchdogThreshold });
+    if (options.watchdogThreshold) watchdog.stallTokenThreshold = options.watchdogThreshold;
 
     while (!streamDone) {
         // High-level watchdog: if we stick in reader.read() too long, abort
         const readPromise = reader.read();
         const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error("STREAM_READ_TIMEOUT")), 120000)
+            setTimeout(() => reject(new Error("STREAM_READ_TIMEOUT")), 300000) // Increased to 5m for slow reasoning
         );
 
         let value, done;
@@ -310,6 +312,7 @@ async function callLocalStreaming(messages, options = {}, targetModelOverride = 
     };
 }
 
+
 /**
  * Call Gemini (Cloud) LLM
  */
@@ -396,7 +399,10 @@ let currentLocalModel = null; // Track what we think is running
  * Main chat function
  */
 export async function chat(messages, options = {}) {
-    return await withLock('prometheus', async () => {
+    const owner = options.jobName || 'prometheus';
+    const priority = options.priority; // Default to undefined -> ModelController defaults to HIGH
+
+    return await modelController.enqueue(owner, async () => {
         const modelToUse = options.forceModel || modelOverride;
 
         // Determine target local model
@@ -429,7 +435,7 @@ export async function chat(messages, options = {}) {
 
             console.log('⏳ Waiting for model switch...');
             let attempts = 0;
-            while (attempts < 300) { // Up to 300s for 9B/14B+ models
+            while (attempts < 480) { // Up to 8 minutes for 9B/14B+ models (swapping)
                 await new Promise(r => setTimeout(r, 1000));
                 const newModels = await getLocalModels();
                 if (newModels.includes(targetLocalModel)) {
@@ -440,7 +446,7 @@ export async function chat(messages, options = {}) {
                 }
                 attempts++;
             }
-            if (attempts >= 300) {
+            if (attempts >= 480) {
                 console.warn(`⚠️ Timeout waiting for model switch: ${targetLocalModel}. Proceeding anyway (may fail).`);
             }
         }
@@ -454,16 +460,16 @@ export async function chat(messages, options = {}) {
 
         console.log('⏳ Waiting for server startup...');
         let attempts = 0;
-        while (attempts < 300) { // Increased to 5 minutes for slow model loads
+        while (attempts < 480) { // Increased to 8 minutes for slow model loads
             await new Promise(r => setTimeout(r, 1000));
             if (await isLocalAvailable()) {
-                await new Promise(r => setTimeout(r, 2000)); // Additional buffer for memory mapping
+                await new Promise(r => setTimeout(r, 2000)); // Additional buffer
                 console.log('✅ Server online with new model.');
                 break;
             }
             attempts++;
         }
-        if (attempts >= 300) {
+        if (attempts >= 480) {
             throw new Error(`Timeout waiting for Llama Server to load model: ${targetLocalModel}`);
         }
     } else {

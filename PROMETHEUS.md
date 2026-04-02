@@ -1,6 +1,13 @@
-# Prometheus Project Timeline
-
 This file tracks the autonomous progress and milestones of the Prometheus AI Assistant. See also: [[README]] | [[MANUAL]] | [[ROLES]]
+
+### 2026-04-01 11:30:00 AM
+- **Major Architecture Shift**: Implemented the **Prioritized Model Controller (Scheduler)**.
+    - **Zero-Jitter Hardware Access**: Replaced the filesystem "Spin-Lock" with an event-driven FIFO queue. Reduced polling latency from 1000ms to 100ms.
+    - **Priority Scheduling**: Enforced a strict priority matrix where interactive user turns (Niki/Devon) jump to the front of the queue, pre-empting background tasks.
+    - **Context Healing**: Resolved "Induced Amnesia" by removing destructive history wipes on autonomous handoffs. History now persists across 50+ turns using a sliding window.
+    - **Expanded Memory**: Increased history truncation limits from 1,500 to **12,000 characters** for 9B models, enabling reliable long-file analysis.
+    - **Refactored Summarizer**: Moved history compression into a core class method that respects the scheduler's queue, preventing background interference during reasoning.
+
 
 ### 2026-03-31 05:50:00 AM
 - **Optimization Breakthrough**: Implemented **4-bit KV Cache Quantization** (TurboQuant) for local MLX models.
@@ -85,3 +92,6 @@ This file tracks the autonomous progress and milestones of the Prometheus AI Ass
 
 ### 2026-03-01 1:08:45 AM
 - **Summary**: Executed a research plan for the top 10 new/trending projects on GitHub, initialized a note, gathered data from web search, and appended summaries for each project.
+
+### 2026-04-02 10:19:25 PM
+- **Summary**: Recorded a lesson learned about Python AST analysis into long-term memory. The observation includes key concepts: python, ast-analysis, static-analysis, and code-inspection.

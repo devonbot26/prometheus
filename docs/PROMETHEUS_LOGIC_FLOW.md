@@ -9,6 +9,7 @@ sequenceDiagram
     participant User as Native Dashboard (SwiftUI)
     participant WS as Web Server (Socket.io)
     participant Agent as Core Agent (agent.js)
+    participant Scheduler as Model Controller (Queue)
     participant FastLLM as MLX Fast (Qwen 4B : 18888)
     participant HeavyLLM as MLX Heavy (Qwen 9B : 18889)
     participant Skill as Gmail Skill (bridge.js)
@@ -19,16 +20,19 @@ sequenceDiagram
     WS->>Agent: Calls agent.process(text)
     
     rect rgb(30, 30, 50)
-        Note over Agent: Phase 1: Routing & Preparation
+        Note over Agent: Phase 1: Routing & Admission
         Agent->>Agent: Intent Routing (Identifies 'gmail' intent)
         Agent->>Agent: Dynamic Skill Injection (Loads Gmail schema)
-        Agent->>Agent: Fast Override ("email" keyword -> Forces 2B Model)
+        Agent->>Agent: Priority Tagging (Sets Priority: HIGH)
     end
+
+    Agent->>Scheduler: Pushes Task (HIGH)
+    Scheduler->>Scheduler: Jumps to Head of Queue
+    Scheduler->>FastLLM: Executes Prompt: "any new emails?"
+    FastLLM-->>Scheduler: Output JSON Call
+    Scheduler-->>Agent: Returns Tool Call Data
     
-    Agent->>FastLLM: 1st Prompt: "any new emails?" + Skills JSON
-    FastLLM-->>Agent: Output: `{"tool": "gmail_scan", "args": {"limit": 5}}`
-    
-    note over Agent: If 4B Tool Failure -> Escalate to 9B (18889)
+    note over Agent: If 4B Tool Failure -> Escalate to 9B via Scheduler
     
     rect rgb(30, 50, 30)
         Note over Agent, Skill: Phase 2: Tool Execution

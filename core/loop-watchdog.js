@@ -8,7 +8,7 @@ export class StreamWatchdog {
         this.minPatternLength = options.minPatternLength || 40; // Characters
         this.maxWindowSize = options.maxWindowSize || 1000;    // Last N characters
         this.repetitionThreshold = options.repetitionThreshold || 3; // Occurrences
-        this.stallTokenThreshold = options.stallTokenThreshold || 2000; // Tokens without action
+        this.stallTokenThreshold = options.stallTokenThreshold || 5000; // Tokens without action
         
         this.buffer = '';
         this.tokensSinceAction = 0;

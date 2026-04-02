@@ -5,11 +5,11 @@
         "get_weather": {
             "path": "index.js",
             "function": "get_weather",
-            "description": "Get current weather condition, temperature, and 3-day forecast. If the user does not specify a city, you must run this tool without the location parameter to use the system default location (Charlottetown, PEI).",
+            "description": "Get current weather for any city.",
             "parameters": {
                 "location": {
                     "type": "string",
-                    "description": "City name (e.g. 'New York', 'London'). Omit if unspecified.",
+                    "description": "City name (e.g., 'Toronto')",
                     "required": false
                 }
             }

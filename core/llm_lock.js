@@ -53,17 +53,18 @@ export function releaseLock() {
  */
 export async function withLock(owner, fn) {
     let acquired = false;
-    const maxRetries = 60; // 60 seconds
+    const maxRetries = 600; // 60 seconds (at 100ms intervals)
     
     for (let i = 0; i < maxRetries; i++) {
         acquired = acquireLock(owner);
         if (acquired) break;
         
-        if (i > 0 && i % 5 === 0) {
-            console.log(`⏳ [LLM_LOCK] ${owner} is waiting for hardware access (held for ${i}s)...`);
+        if (i > 0 && i % 50 === 0) {
+            console.log(`⏳ [LLM_LOCK] ${owner} is waiting for hardware access (held for ${(i/10).toFixed(1)}s)...`);
         }
         
-        await new Promise(r => setTimeout(r, 1000));
+        // Wait 100ms instead of 1s to reduce jitter for the Model Controller
+        await new Promise(r => setTimeout(r, 100));
     }
 
     if (!acquired) {

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Prometheus MLX Launcher
 
-DEFAULT_MODEL="Jackrong/MLX-Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-v2-4bit"
+DEFAULT_MODEL="Jackrong/MLX-Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-4bit"
 MODEL_ID="${1:-$DEFAULT_MODEL}"
 DRAFT_MODEL="$2"
 PORT=18888

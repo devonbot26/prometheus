@@ -10,8 +10,9 @@ import fetch from 'node-fetch';
 const LLAMA_PORT = 18888;
 const PROMETHEUS_URL = process.env.PROMETHEUS_URL || 'http://localhost:3000';
 const WEB_PORT = parseInt(new URL(PROMETHEUS_URL).port) || 3000;
-const CHECK_INTERVAL = 30000; // Reduced to 30s for faster memory response
-const HEALTH_TIMEOUT = 300000;
+const CHECK_INTERVAL = 30000;
+const HEALTH_TIMEOUT = 480000; // Increased to 8m for 16GB Macs (Swap latency)
+const HEALTH_PORT = process.env.LLAMA_PORT || 18888;
 const STARTUP_SCRIPT = './scripts/start_llama.sh';
 
 // ANSI Colors
@@ -43,12 +44,18 @@ function getFreeMemMB() {
     try {
         if (os.platform() === 'darwin') {
             const output = execSync('vm_stat').toString();
+            // Core logic fixed to account for Purgeable RAM as Available (matches Activity Monitor)
+            const matches = output.match(/Pages (free|inactive|speculative|purgeable):\s+(\d+)/g);
+            if (!matches) return Math.floor(os.freemem() / (1024 * 1024));
+            
+            const stats = {};
+            matches.forEach(m => {
+                const [_, name, val] = m.match(/Pages (free|inactive|speculative|purgeable):\s+(\d+)/);
+                stats[name] = parseInt(val);
+            });
             const pageSize = 16384; 
-            const free = parseInt(output.match(/Pages free:\s+(\d+)/)[1]);
-            const inactive = parseInt(output.match(/Pages inactive:\s+(\d+)/)[1]);
-            const speculative = parseInt(output.match(/Pages speculative:\s+(\d+)/)[1]);
-            const purgeable = parseInt(output.match(/Pages purgeable:\s+(\d+)/)[1]);
-            return Math.floor(((free + inactive + speculative + purgeable) * pageSize) / (1024 * 1024));
+            const totalPages = (stats.free || 0) + (stats.inactive || 0) + (stats.speculative || 0) + (stats.purgeable || 0);
+            return Math.floor((totalPages * pageSize) / (1024 * 1024));
         }
         return Math.floor(os.freemem() / (1024 * 1024));
     } catch (e) {
@@ -109,7 +116,7 @@ if (freeMB < 1000) {
     if (isHeavy) {
         console.log(`${C.yellow}💡 Recommendation: Close unnecessary apps (Chrome/Docker) to free up RAM.${C.reset}\n`);
     } else {
-        console.log(`${C.yellow}💡 Recommendation: Using ${currentModel.includes('4B') ? 'Ultra-Fast 4B' : 'Qwen3.5 9B'} for optimal local performance.${C.reset}\n`);
+        console.log(`${C.yellow}💡 Recommendation: Using ${currentModel.includes('4B') ? 'Ultra-Fast 4B' : 'Baseline Reasoning'} for optimal local performance.${C.reset}\n`);
     }
 }
 
@@ -121,13 +128,13 @@ async function checkServerHealth() {
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout per check
 
     try {
-        let res = await fetch(`http://127.0.0.1:${LLAMA_PORT}/v1/models`, { signal: controller.signal }).catch(() => null);
+        let res = await fetch(`http://127.0.0.1:${HEALTH_PORT}/v1/models`, { signal: controller.signal }).catch(() => null);
         if (res && res.ok) return true;
 
-        res = await fetch(`http://127.0.0.1:${LLAMA_PORT}/models`, { signal: controller.signal }).catch(() => null);
+        res = await fetch(`http://127.0.0.1:${HEALTH_PORT}/models`, { signal: controller.signal }).catch(() => null);
         if (res && res.ok) return true;
 
-        res = await fetch(`http://127.0.0.1:${LLAMA_PORT}/health`, { signal: controller.signal }).catch(() => null);
+        res = await fetch(`http://127.0.0.1:${HEALTH_PORT}/health`, { signal: controller.signal }).catch(() => null);
         if (res && res.ok) return true;
 
         return false;
@@ -158,9 +165,17 @@ async function getLoadedModels() {
 let serverProcess = null;
 let hermesProcess = null;
 let isRestarting = false;
+let intendedModel = null;
 
 // MLX Lifecycle State
 let currentMlxState = 'offline'; 
+let generationConfig = {
+    maxTokens: 4096,
+    temperature: 0.0,
+    topP: 1.0,
+    watchdogThreshold: 5000
+};
+
 const broadcastState = (state, model) => {
     currentMlxState = state;
     if (global.uiProcess && global.uiProcess.connected) {
@@ -196,7 +211,7 @@ function startLlamaServer(modelName) {
         }
     }
 
-    const model = modelName || process.env.LLM_MODEL || 'mlx-community/Qwen3.5-4B-4bit';
+    const model = modelName || process.env.LLM_MODEL || 'Jackrong/MLX-Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-4bit';
     const logFile = createWriteStream('./logs/mlx_server.log', { flags: 'a' });
 
     console.log(`${C.dim}Environment: ${pythonPath}${C.reset}`);
@@ -421,7 +436,7 @@ async function main() {
     // 1. Initial Health Check
     let availableModels = await getLoadedModels();
     const isCli = process.argv.includes('--cli');
-    const DEFAULT_MODEL = process.env.LLM_MODEL || 'mlx-community/Qwen3.5-4B-4bit';
+    const DEFAULT_MODEL = process.env.LLM_MODEL || 'Jackrong/MLX-Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-4bit';
 
     // Retry once if availableModels is empty (server might be warming up)
     if (availableModels.length === 0) {
@@ -496,7 +511,7 @@ async function main() {
                 return; // Stop processing other messages if offloading
             } else if (freeMB > 6000 && !serverProcess && !isRestarting) {
                 console.log(`${C.green}✅ Memory recovered (${freeMB}MB). Relaunching 4B Llama Server.${C.reset}`);
-                startLlamaServer(process.env.LLM_MODEL || 'Jackrong/MLX-Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-v2-4bit');
+                startLlamaServer(process.env.LLM_MODEL || 'Jackrong/MLX-Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-4bit');
                 return; // Stop processing other messages if relaunching
             }
             */
@@ -515,8 +530,15 @@ async function main() {
             }
 
             if (msg.type === 'RESTART_LLAMA') {
-                if (isRestarting && !msg.forceClean) return;
+                if (isRestarting && !msg.forceClean) {
+                    if (msg.model === intendedModel) {
+                        console.log(`${C.dim}⏳ Already spawning ${msg.model}. Ignoring duplicate request.${C.reset}`);
+                        return;
+                    }
+                    console.log(`${C.yellow}🔄 Switching intended model from ${intendedModel} to ${msg.model}.${C.reset}`);
+                }
                 isRestarting = true;
+                intendedModel = msg.model;
                 try {
                     const available = await getLoadedModels();
                     if (available.includes(msg.model) && !msg.forceClean) {
@@ -529,6 +551,7 @@ async function main() {
                     console.log(`${C.dim}📡 Available: ${available.join(', ')}${C.reset}`);
                     logGepEvent('repair', 'model_restart_requested', { model: msg.model });
                     
+                    if (msg.model) process.env.LLM_MODEL = msg.model; 
                     broadcastState('spawning', msg.model);
                     await killServer();
 
@@ -562,6 +585,7 @@ async function main() {
                             }
                             broadcastState('online', msg.model);
                             isRestarting = false;
+                            intendedModel = msg.model;
                         } else {
                             setTimeout(checkHealthy, 2000);
                         }
@@ -569,12 +593,20 @@ async function main() {
                     checkHealthy();
                 } catch (e) {
                     isRestarting = false;
+                    intendedModel = null;
                     broadcastState('offline');
                 }
             }
 
             if (msg.type === 'HERMES_ACTIVITY') {
                 lastActivityTime = Date.now(); // Prevent idle-unload of MLX during Hermes reasoning
+            }
+        });
+
+        proc.on('message', (msg) => {
+            if (msg.type === 'update_gen_config') {
+                generationConfig = { ...generationConfig, ...msg.config };
+                console.log(`${C.cyan}⚙️  Manager: Updated Generation Config: ${JSON.stringify(generationConfig)}${C.reset}`);
             }
         });
 
@@ -629,9 +661,9 @@ async function main() {
             const freeMB = getFreeMemMB();
 
             // Auto-offload check
-            if (freeMB < 50 && serverProcess && !isRestarting) {
+            if (freeMB < 50 && serverProcess && !isRestarting && currentMlxState !== 'generating') {
                 console.log(`${C.red}⚠️  EXTREME LOW MEMORY: ${freeMB}MB free. System stability at risk.${C.reset}`);
-                // Only offload if absolutely necessary (<50MB)
+                // Only offload if absolutely necessary (<50MB) and NOT generating
                 broadcastState('offloaded');
                 await killServer();
                 logGepEvent('memory_offload', 'CRITICAL_RAM', { free_mb: freeMB, action: 'emergency_offload' });
@@ -639,7 +671,7 @@ async function main() {
 
             // 2. Memory Recovery Auto-Start (above 6GB)
             if (freeMB > 6000 && !serverProcess && !isRestarting) {
-                console.log(`${C.green}✅ MEMORY RECOVERED: ${freeMB}MB free. Resuming 4B server.${C.reset}`);
+                console.log(`${C.green}✅ MEMORY RECOVERED: ${freeMB}MB free. Resuming reasoning server.${C.reset}`);
                 startLlamaServer();
             }
 

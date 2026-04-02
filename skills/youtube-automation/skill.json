@@ -20,6 +20,7 @@
   "timeout": 900,
   "tools": {
     "process_youtube_mix": {
+      "path": "index.js",
       "description": "CRITICAL: The tool name is exactly 'process_youtube_mix'. A high-level automation tool that downloads a YouTube mix, splits it into tracks, and renames them using a provided artist name. Automatically handles model escalation to 9B if required.",
       "parameters": {
         "url": {

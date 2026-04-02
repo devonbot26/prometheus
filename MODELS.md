@@ -1,46 +1,31 @@
 # Prometheus Model Architecture & Routing Design
 
-Prometheus utilizes a tiered model strategy to balance local execution speed, reliability, and reasoning depth on Apple Silicon hardware.
-
 ## 🏗️ Model Hierarchy
 
-| Tier | Name | Model ID | Primary Role | Logic Strategy |
-| :--- | :--- | :--- | :--- | :--- |
-| **Lightning** | **Fast Mode** | `Qwen 3.5 4B Base` | Greetings, simple Q&A, low-latency utility. | **Embedded Reasoning**: Forced step-by-step thinking via system prompt. |
-| **Core** | **Primary Brain** | `Qwen 3.5 9B Claude-Abliterated` | Coding (`team-coder`), Management (`team-manager`), and specialized roles. | **Abliterated Distillation**: High instruction following with reduced censorship. |
-| **Heavy** | **Deep Thinking** | `DeepSeek-R1-Distill-Qwen-14B` | Complex logic, structural planning, and error recovery. | **Chain-of-Thought**: Native `<think>` tags via distilling DeepSeek-R1. |
-| **Embedding**| **Librarian** | `all-MiniLM-L6-v2` | Knowledge Base vectorization. | **Vector Search**: Semantic retrieval for skills and memories. |
+| Tier | Name | Model | Context | Primary Role |
+|:---|:---|:---|:---|:---|
+| **Assistant** | **Devon** | `Qwen 3.5 4B` | **8k / 32k** | Personal assistant. All-rounder. |
+| **Smart** | **Niki / Expert Coder** | `Qwen 3.5 9B` | **12k / 128k**| Management, architecture, deep coding. |
 
 ---
 
-## 🌐 Dual-Server Infrastructure
+## 🧭 Key Design Decisions
 
-Prometheus is designed to operate across a dual-server infrastructure for enhanced reliability and performance:
+### 1. Devon is Standalone (NOT a team member)
+Devon runs on the 4B model with a 32k context window. She tries every task but suggests Niki (9B) if she hits her reasoning limit. Handoff only occurs on Nelson's explicit instruction.
 
-- **Primary Server (Local)**: Hosts the **Lightning**, **Core**, and **Heavy** models. This server is optimized for low-latency inference on Apple Silicon.
-- **Secondary Server (Cloud)**: Hosts the **Embedding** model and provides fallback for **Core** and **Heavy** models during peak load or local resource constraints. This server leverages cloud-based GPUs for scalable vectorization and complex reasoning.
+### 2. Expert Coder runs on 9B (Same as Niki)
+When Niki delegates a coding task to the Expert Coder, there is NO model switch. Both run on the same 9B model. This eliminates VRAM churn and ensures reasoning depth is maintained.
 
-This architecture ensures that core operations remain fast and local, while offloading resource-intensive tasks and providing redundancy through cloud services.
+### 3. Universal Patience Window (5 Minutes)
+All models operate with a 300-second watchdog for TTFT and stream reads. This prevents premature timeouts during disk-IO contention on 16GB Macs.
 
-## 🧭 Routing Logic
+### 4. Activity Monitor Match (RAM Reporting)
+Diagnostics use `vm_stat` to count `Free + Inactive + Speculative + Purgeable` pages, matching the macOS Activity Monitor display.
 
-Prometheus implements an intelligent routing layer in `core/agent.js` and `core/llm.js` to ensure the most efficient model handles each request:
+### 5. Prioritized Model Scheduling
+To prevent hardware contention on Apple Silicon, all LLM requests are routed through a **Model Controller**. **Interactive** chat (user prompts) always jumps to the head of the queue, while **Background** tasks (Summarizer, Audits) wait for idle hardware.
 
-1. **Greeting Interceptor**: Simple messages (hi, hello, reset) are automatically routed to the **4B Fast model** to preserve RAM and provide sub-second responses.
-2. **Role Mapping**: Specialized roles (`team-assistant`, `team-coder`, etc.) are mapped to specific models via `ROLE_MODEL_MAP` in `core/agent.js`.
-3. **Autonomous Escalation**: When Niki detect a "logic loop" (repeated failures) or the user prepends `/think`, the session is promoted to the **14B Deep Thinking** model.
-4. **Fast Mode Flag**: The `chat()` function in `llm.js` supports a `fast: true` option that forces the 4B model regardless of the active role.
-
-## 🧠 Reasoning Prompt Strategy (Small Models)
-
-For 4B-class models, Prometheus bypasses native "Reasoning" variants (which often hallucinate at small scales) in favor of the **Base 4B model** combined with an **Optimized Reasoning Prompt**:
-
-> "You are a highly analytical AI assistant. For every query, you must first think step-by-step, analyzing the problem and exploring multiple solutions. Then provide your final answer."
-
-This strategy provides the logical structure of a reasoning model at the raw throughput of a base model (~35 TPS).
 
 ---
-*For raw benchmark data and test case details, see [docs/benchmarks/PERFORMANCE_REPORT.md](file:///Users/nelsonwong/Documents/projects/Prometheus/docs/benchmarks/PERFORMANCE_REPORT.md).*
-
----
-*Last Updated: March 2026*
+*Last Updated: March 2026 (Standalone Devon & 9B Coder Update)*

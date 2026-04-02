@@ -13,10 +13,9 @@ class ProjectIndexer {
 
     async initialize() {
         logDebug('[DEBUG] ProjectIndexer: Initializing...');
+        this.lastRefresh = Date.now();
         await this.refresh();
-
-        // Setup background refresh
-        setInterval(() => this.refresh(), this.refreshInterval);
+        // Background refresh moved to core/tick-loop.js
     }
 
     async refresh() {

@@ -6,6 +6,7 @@
   "tools": {
     "open_app": {
       "function": "open_app",
+      "path": "index.js",
       "description": "Opens a macOS application by name (e.g. Notes, Finder, Music).",
       "parameters": {
         "app_name": {
@@ -17,6 +18,7 @@
     },
     "run_applescript": {
       "function": "run_applescript",
+      "path": "index.js",
       "description": "Runs a custom AppleScript command via the Native Dashboard.",
       "parameters": {
         "script": {
@@ -28,6 +30,7 @@
     },
     "get_clipboard": {
       "function": "get_clipboard",
+      "path": "index.js",
       "description": "Retrieves the current text content of the macOS clipboard.",
       "parameters": {}
     }
