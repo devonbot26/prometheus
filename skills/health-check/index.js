@@ -88,11 +88,21 @@ export async function diagnose_system_health(args) {
         const lastAttempt = healingState[errorId] || 0;
         const minutesSinceLast = (now - lastAttempt) / 60000;
 
+        // 🌟 New: Transient Error Handling
+        // If the error is an abortion or timeout, it's often a transient system/network state
+        const errorMessage = report.join('\n');
+        const isTransient = errorMessage.toLowerCase().includes('abort') || errorMessage.toLowerCase().includes('timeout');
+
         report.push(`### 🛡️ Decision Tree`);
         const isSwapping = swapInfo !== "0M" && swapInfo !== "N/A";
         
         let finalStatus = "";
-        if (lastAttempt > 0 && minutesSinceLast < 5) {
+        
+        if (isTransient) {
+            report.push(`- ℹ️ **TRANSIENT ERROR**: This issue appears to be a temporary system abortion or timeout.`);
+            report.push(`- **Action**: Bypassing strict loop prevention. You should retry your last action.`);
+            finalStatus = "\n\n✅ **Transient Issue Detected.** This was likely a temporary network or processing hiccup. You are clear to proceed with your original task.";
+        } else if (lastAttempt > 0 && minutesSinceLast < 5) {
             report.push(`- 🛑 **LOOP DETECTED**: This error was touched ${minutesSinceLast.toFixed(1)}m ago.`);
             report.push(`- **Final Decision**: DO NOT AUTO-FIX. Handing off to human.`);
             generateSymptomsMd(errorId, "Recursive auto-heal loop detected.", report.join('\n\n'));

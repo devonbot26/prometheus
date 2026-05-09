@@ -32,3 +32,17 @@ downloads/
 *.tar.gz
 *.gguf
 *.safetensors
+
+prompts/dynamic/*.md
+
+# Media files
+*.mp3
+*.mp4
+*.mov
+*.avi
+*.wav
+*.mkv
+*.m4a
+*.ogg
+*.webm
+*.flac

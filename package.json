@@ -7,6 +7,7 @@
     "scripts": {
         "start": "node prom.js",
         "start:cli": "node prom.js --cli",
+        "heal": "node scripts/physician.mjs",
         "restore": "node -e 'import(\"./skills/google-drive/bridge.js\").then(m => m.drive_restore())'",
         "dev": "node --watch channels/cli.js"
     },

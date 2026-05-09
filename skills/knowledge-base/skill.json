@@ -65,6 +65,18 @@
                     "required": true
                 }
             }
+        },
+        "delete_knowledge": {
+            "path": "index.js",
+            "function": "delete_knowledge",
+            "description": "Permanently remove a specific entry from the knowledge base by searching for it.",
+            "parameters": {
+                "query": {
+                    "type": "string",
+                    "description": "Search term to identify the item to delete (e.g. the duplicate text)",
+                    "required": true
+                }
+            }
         }
     }
 }

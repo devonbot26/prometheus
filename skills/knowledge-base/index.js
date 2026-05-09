@@ -154,3 +154,29 @@ export async function update_project_timeline(args) {
         return { error: e.message };
     }
 }
+
+export async function delete_knowledge(args) {
+    const { query } = args;
+    if (!query) return { error: 'Query is needed' };
+
+    try {
+        const vector = await getEmbedding(query);
+        const idx = await getIndex();
+
+        // Find the top match to delete
+        const results = await idx.queryItems(vector, 1);
+
+        if (results.length === 0) {
+            return { found: false, message: 'No matching knowledge found to delete.' };
+        }
+
+        const itemToDelete = results[0].item;
+        await idx.deleteItem(itemToDelete.id);
+
+        console.log(`🗑️ Deleted knowledge: "${itemToDelete.metadata.text.substring(0, 50)}..."`);
+        return { success: true, message: 'Entry deleted from long-term memory.', deleted: itemToDelete.metadata.text };
+    } catch (e) {
+        logDebugError('Delete error:', e);
+        return { error: e.message };
+    }
+}

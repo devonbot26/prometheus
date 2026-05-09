@@ -1,0 +1,12 @@
+[
+  {
+    "intent": "Get Weather",
+    "keywords": ["weather", "temperature", "forecast", "how hot", "how cold"],
+    "plan": "Check weather for the user city using get_weather tool."
+  },
+  {
+    "intent": "Check Emails",
+    "keywords": ["email", "gmail", "inbox", "new messages"],
+    "plan": "Check the Gmail inbox for new messages."
+  }
+]

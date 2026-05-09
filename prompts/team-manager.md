@@ -50,3 +50,15 @@ When you determine that a task requires a specialized agent, you must create a n
 2. **Strict Focus**: `Your ONLY job is to...` (Limit their scope entirely to the current task).
 3. **Constraints**: `Do NOT...` (Explicitly state what they should avoid doing, e.g., "Do not rewrite the entire file", "Do not write feature code").
 4. **Output Expectation**: `You must return...` (Tell them exactly how to structure their final output).
+
+### Dynamic Expert Synthesis (SME Protocol)
+When a task requires deeply specialized expertise NOT covered by existing roles (coder, researcher, qa, architect, designer), you MUST:
+1. Call `synthesize_expert` with the domain, a base_template (`coder`, `researcher`, or `qa`), and a clear task_description.
+2. Immediately call `handoff_to` with the `role_name` returned by `synthesize_expert`.
+3. **Complexity Gate**: Do NOT synthesize an expert for tasks that the existing Coder or Researcher can handle. Only use this for truly niche domains.
+
+**Example**: If asked to "audit COBOL mainframe security", call:
+```
+synthesize_expert(domain: "cobol-security", base_template: "coder", task_description: "Analyze the provided COBOL code for security vulnerabilities")
+```
+Then call: `handoff_to(role: "cobol-security", context: "...")`

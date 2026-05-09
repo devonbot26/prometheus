@@ -57,14 +57,19 @@ const PLAN_CONTEXT_PATH = path.join(__dirname, '.plan_context.json');
 import { EventEmitter } from 'events';
 
 export const ROLE_MODEL_MAP = {
-    'team-architect': { modelId: process.env.LLM_MODEL_HEAVY, forceLocal: true, maxTokens: parseInt(process.env.CTX_LIMIT_9B) || 16384, deepThinking: true },
-    'team-coder': { modelId: process.env.LLM_MODEL_HEAVY, forceLocal: true, maxTokens: parseInt(process.env.CTX_LIMIT_9B) || 16384 },
+    'team-architect': { modelId: process.env.LLM_MODEL, forceLocal: true, maxTokens: parseInt(process.env.CTX_LIMIT_9B) || 16384 },
+    'team-coder': { modelId: process.env.LLM_MODEL, forceLocal: true, maxTokens: parseInt(process.env.CTX_LIMIT_9B) || 16384 },
     'team-designer': { modelId: process.env.LLM_MODEL, forceLocal: true, maxTokens: parseInt(process.env.CTX_LIMIT_9B) || 16384 },
     'team-qa': { modelId: process.env.LLM_MODEL, forceLocal: true, maxTokens: parseInt(process.env.CTX_LIMIT_9B) || 16384 },
     'team-researcher': { modelId: process.env.LLM_MODEL, forceLocal: true, maxTokens: parseInt(process.env.CTX_LIMIT_9B) || 16384 },
-    'team-manager': { modelId: process.env.LLM_MODEL_HEAVY, forceLocal: true, deepThinking: true, maxTokens: parseInt(process.env.CTX_LIMIT_9B) || 16384 },
+    'team-manager': { modelId: process.env.LLM_MODEL, forceLocal: true, maxTokens: parseInt(process.env.CTX_LIMIT_9B) || 16384 },
     'devon': { modelId: process.env.LLM_MODEL, forceLocal: true, maxTokens: parseInt(process.env.CTX_LIMIT_9B) || 16384 }
 };
+
+// Dynamic role fallback: any team-* role not in the map inherits team-coder's config
+export function getRoleConfig(role) {
+    return ROLE_MODEL_MAP[role] || ROLE_MODEL_MAP['team-coder'];
+}
 
 export class Agent extends EventEmitter {
     constructor() {
@@ -303,18 +308,19 @@ export class Agent extends EventEmitter {
             logDebug(`[DEBUG] MLX Cache Buster active. ID: ${busterId}`);
         }
 
-        // 4. Dynamic Context Budgeting
         const effectiveCtxLimit = parseInt(process.env.CTX_LIMIT_9B || '16384');
         
         const historyBudgetTokens = effectiveCtxLimit - 8192;
         const avgMsgTokens = 800; 
-        const maxHistoryMsgs = Math.max(2, Math.min(Math.floor(historyBudgetTokens / avgMsgTokens), 15));
+        const maxHistoryMsgs = Math.max(4, Math.min(Math.floor(historyBudgetTokens / avgMsgTokens), 20)); // Increased for multi-step resilience
+
+        const inToolLoop = options.iterations > 0;
 
         if (ultraLowMem) {
             messages.push({ role: 'system', content: patchedSystemPrompt });
             if (userMessage) messages.push({ role: 'user', content: userMessage });
             logDebug(`[DEBUG] History wiped for ultra-low memory stateless mode.`);
-        } else if (isGreeting || isUtility) {
+        } else if (isGreeting && !inToolLoop) {
             const recentHistory = cleanedHistory.slice(-8);
             const hasHighValueContext = recentHistory.some(m => 
                 m.role === 'system' || 
@@ -327,13 +333,27 @@ export class Agent extends EventEmitter {
                 messages.push({ role: 'system', content: patchedSystemPrompt });
                 messages.push(...cleanedHistory.slice(-maxHistoryMsgs));
             } else {
-                const historyLimit = -3;
+                const historyLimit = -5; // Increased from -3 to prevent tool-forgetting
                 messages.push({ role: 'system', content: patchedSystemPrompt });
                 messages.push(...cleanedHistory.slice(historyLimit));
             }
         } else {
             messages.push({ role: 'system', content: patchedSystemPrompt });
-            messages.push(...cleanedHistory.slice(-maxHistoryMsgs));
+            
+            // Pillar 1: Summary Migration Logic
+            // Ensure the HISTORICAL CONTEXT SUMMARY is always included, even if outside the slice
+            const historySlice = cleanedHistory.slice(-maxHistoryMsgs);
+            const hasSummaryInSlice = historySlice.some(m => m.content && m.content.includes('HISTORICAL CONTEXT SUMMARY'));
+            
+            if (!hasSummaryInSlice) {
+                const globalSummary = cleanedHistory.find(m => m.content && m.content.includes('HISTORICAL CONTEXT SUMMARY'));
+                if (globalSummary) {
+                    messages.push(globalSummary);
+                    logDebug(`🧠 [MEMORY] Migrated historical summary into active context.`);
+                }
+            }
+            
+            messages.push(...historySlice);
             logDebug(`[DEBUG] History capped at ${maxHistoryMsgs} messages (budget: ${historyBudgetTokens} tokens).`);
         }
 
@@ -767,7 +787,7 @@ export class Agent extends EventEmitter {
             const ultraLowMem = freeMB < 200 && !disableCompressed;
 
             // Fix 9: Check the active role's model, not the env default
-            const activeRoleModel = ROLE_MODEL_MAP[this.activeMode]?.modelId || process.env.LLM_MODEL || '';
+            const activeRoleModel = getRoleConfig(this.activeMode)?.modelId || process.env.LLM_MODEL || '';
             // Only consider it 9B if the string explicitly contains 9B or is a known large model
             const is9B = activeRoleModel.includes('9B') || activeRoleModel.toLowerCase().includes('nanbeige') || activeRoleModel.toLowerCase().includes('niki');
             logDebug(`[DEBUG] Memory: ${freeMB}MB, LowMem: ${lowMem}, UltraLow: ${ultraLowMem}, role: ${this.activeMode}, model: ${activeRoleModel}, is9B: ${is9B}`);
@@ -777,7 +797,7 @@ export class Agent extends EventEmitter {
             isSimpleGreeting = greetings.includes(cleanMessage.toLowerCase());
             
             // Phase 5: Early Utility Detection for Routing & Pruning
-            isUtility = /\b(gmail|email|weather|search)\b/i.test(lowerMsg);
+            isUtility = /\b(gmail|email|weather|search|obsidian|note|read|file)\b/i.test(lowerMsg);
 
             // Phase 50: Low-Latency Routing (Standard Greeting)
             if (isSimpleGreeting && !deepThinking) {
@@ -832,8 +852,27 @@ export class Agent extends EventEmitter {
                     console.log(`🎯 [DIRECT MODE] Using only detected/relevant skills for ${this.activeMode}.`);
                     dynamicTools = detectionInjection;
                 } else {
+                    // Check if this is a dynamic expert with a tool_template
+                    let templateSkills = [];
+                    const roleName = this.activeMode.replace('team-', '');
+                    const dynamicPromptPath = path.join(__dirname, '..', `prompts/dynamic/team-${roleName}.md`);
+                    if (fs.existsSync(dynamicPromptPath)) {
+                        const content = fs.readFileSync(dynamicPromptPath, 'utf-8');
+                        const templateMatch = content.match(/<!--\s*tool_template:\s*(\w+)\s*-->/);
+                        if (templateMatch) {
+                            const template = templateMatch[1];
+                            if (template === 'coder') templateSkills = ['terminal', 'self-coder'];
+                            else if (template === 'researcher') templateSkills = ['web-search', 'web-scraper'];
+                            else if (template === 'qa') templateSkills = ['terminal'];
+                            console.log(`🧠 [DYNAMIC] Injecting ${template} tools for ${this.activeMode}: ${templateSkills.join(', ')}`);
+                        }
+                    }
+
                     const pmTools = getSpecificToolDescriptions(this.skills, ['handoff_to', 'escalate_to_9b']);
-                    dynamicTools = pmTools + '\n' + detectionInjection;
+                    const extraTools = templateSkills.length > 0
+                        ? getToolDescriptionsForSkills(this.skills, templateSkills)
+                        : '';
+                    dynamicTools = pmTools + '\n' + extraTools + '\n' + detectionInjection;
                     console.log(`🎯 [SUB-AGENT MODE] Adding PM tools to detected skills for ${this.activeMode}.`);
                 }
             } else {
@@ -1023,8 +1062,7 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
                 console.log(`\x1b[33m🛠️ [DEBUG] DYNAMIC TOOLS INJECTED:\n${dynamicTools.substring(0, 1000)}...\x1b[0m`);
             }
 
-            const roleConfig = ROLE_MODEL_MAP[this.activeMode] ||
-                (this.activeMode.startsWith('team-') ? { forceLocal: true } : {});
+            const roleConfig = getRoleConfig(this.activeMode);
 
             const HANDOFF_PATH = path.join(__dirname, '..', 'HANDOFF.json');
 
@@ -1171,7 +1209,9 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
 
                     if (justFinished && justFinished.length > 20) {
                         sentenceCounts[justFinished] = (sentenceCounts[justFinished] || 0) + 1;
-                        if (sentenceCounts[justFinished] > 2) {
+                        // Increased threshold for data-heavy outputs like weather/tables
+                        const threshold = (isUtility || deepThinking) ? 5 : 3;
+                        if (sentenceCounts[justFinished] >= threshold) {
                             logDebugError(`⚠️ [DEBUG] MID-STREAM LOOP DETECTED! Aborting. Pattern: "${justFinished.substring(0, 30)}..."`);
                             streamAborted = true;
                             this.abortController.abort();
@@ -1196,44 +1236,12 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
                 signal: this.abortController.signal
             };
 
-            // (Logic moved below for precedence)
+            // Merge role-specific configuration into chatOptions
+            Object.assign(chatOptions, roleConfig);
 
-            if (ROLE_MODEL_MAP[this.activeMode]) {
-                const roleConfig = { ...ROLE_MODEL_MAP[this.activeMode] };
-                // Graceful fallback: if cloud is requested but no API key, use local instead
-                if (roleConfig.forceCloud && !process.env.GEMINI_API_KEY) {
-                    console.log(`⚠️  [WARNING] ${this.activeMode} wants cloud (Gemini) but GEMINI_API_KEY is not set. Falling back to local.`);
-                    delete roleConfig.forceCloud;
-                    delete roleConfig.cloudModel;
-                    roleConfig.forceLocal = true;
-                }
-                Object.assign(chatOptions, roleConfig);
-            }
-
-            // Phase 5: Error-Driven Auto-Escalation & Utility Routing (Role Restricted)
-            const canAutoEscalate = this.activeMode === 'team-manager' || this.isDelegatedByManager;
-            const lastMsgContent = this.history.findLast(m => m.role === 'assistant')?.content || '';
-            const isErrorLoop = lastMsgContent.includes('"error":');
-
-            const isComplexUtility = /\b(audit|analyze|complex|benchmark|fix|implement|deep|code)\b/i.test(lowerMsg);
-            
-            if (isUtility && !isErrorLoop && !deepThinking && this.activeMode !== 'team-manager' && !isComplexUtility) {
-                console.log(`⚡ [ROUTING] Utility request detected. Using baseline reasoning model.`);
-                chatOptions.modelId = process.env.LLM_MODEL;
-                chatOptions.fast = true;
-                chatOptions.deepThinking = false;
-            } 
-            // Force 9B if there's an error to self-heal, or if explicitly asked/escalated - ONLY for Manager or Delegated
-            else if (canAutoEscalate && (isErrorLoop || deepThinking || this.loopEscalationActive)) {
-                console.log(`🚀 [ROUTING] Escalating to heavy 9B model (reason: ${isErrorLoop ? 'Error' : deepThinking ? 'Explicit' : 'Loop'}). Role: ${this.activeMode}`);
-                chatOptions.modelId = process.env.LLM_MODEL_HEAVY;
-                chatOptions.deepThinking = true;
-            } else if (!canAutoEscalate && (isErrorLoop || this.loopEscalationActive)) {
-                // Devon is struggling but NOT allowed to auto-escalate
-                console.log(`⚠️  [ROUTING] ${this.activeMode} is struggling. Suggesting Niki engage for better reasoning.`);
-                this.emit('log', `⚠️  ${this.activeMode} is struggling with this task. Suggesting Niki (Architect) engage for better reasoning depth.`);
-            }
-
+            // Phase 5: Routing Cleanup (Monolithic Logic Only)
+            chatOptions.modelId = process.env.LLM_MODEL;
+            chatOptions.fast = false;            
             // Phase 4: Prepare Messages for LLM (Budgeted and Pruned)
             const messages = this._prepareMessages(finalPrompt, chatOptions, cleanMessage);
             logDebug('[DEBUG] Messages array prepared for LLM call.');
@@ -1521,14 +1529,13 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
                     break;
                 }
 
-                // Fix 10: Prevent identical redundant tool calls or text loops
-                const currentActionHash = `${toolCall.tool}:${JSON.stringify(toolCall.args)}:${assistantText.substring(0, 100)}`;
+                // Prevent identical redundant tool calls or text loops
+                const currentActionHash = `${toolCall.tool}:${JSON.stringify(toolCall.args)}:${assistantText.substring(0, 50)}`;
                 if (this._lastActionHash === currentActionHash) {
-                    iterations++;
-                    if (iterations > 3) {
-                         console.log(`⚠️ [LOOP STOP] Redundant action detected. Breaking loop.`);
-                         break;
-                    }
+                     console.log(`⚠️ [LOOP STOP] Redundant action detected (${toolCall.tool}). Breaking tool execution loop.`);
+                     // Graceful Break: Strip the tool call and reasoning so the UI shows whatever came BEFORE the tool call
+                     assistantText = finalizeAssistantText(assistantText.replace(/\{"tool":[\s\S]+?\}/g, "").trim() || "I've processed the information and am ready to summarize.");
+                     break;
                 }
                 this._lastActionHash = currentActionHash;
 
@@ -1729,8 +1736,8 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
                             this.history.push({ role: 'assistant', content: assistantText });
                             this.history.push({ role: 'user', content: toolResultMsg });
 
-                            const messages = this._prepareMessages(finalPrompt, chatOptions);
-                            const followUp = await chat(messages, { ...chatOptions, deepThinking: forceDeepThinking });
+                            const messages = this._prepareMessages(finalPrompt, { ...chatOptions, iterations }, "");
+                            const followUp = await chat(messages, { ...chatOptions, deepThinking: false });
 
                             // Track follow-up quota
                             if (followUp.usage) {
@@ -1774,36 +1781,47 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
                         }
                     } catch (e) {
                         // Error Logging Integration
-                        const errorId = errorManager.logError(e, `Tool call: ${toolCall.tool}`);
+                        let errorId = "WATCHDOG_ABORT";
+                        if (!e.message.includes('aborted')) {
+                            errorId = errorManager.logError(e, `Tool call: ${toolCall.tool}`);
+                        }
 
                         if (this.config.self_healing) {
-                            let diagnosticNudge = `\n\n[SYSTEM_DIAGNOSIS] A tool error occurred (ID: ${errorId}). `;
-                            if (e.message.includes('SyntaxError')) {
-                                diagnosticNudge += `Detected a SyntaxError. You MUST use 'diagnose_system_health' to build a fix plan, then use 'verify_syntax' or 'apply_patch'.`;
-                            } else if (e.message.toLowerCase().includes('timeout')) {
-                                diagnosticNudge += `Detected a Timeout. You MUST use 'diagnose_system_health' to audit the process logs.`;
+                            let diagnosticNudge = "";
+                            let errorMsg = "";
+
+                            if (e.message.includes('aborted')) {
+                                diagnosticNudge = `\n\n[SYSTEM_NOTE] This operation was aborted by the safety watchdog due to highly repetitive output (e.g. a long log or note). DO NOT retry the exact same action. Instead, please SUMMARIZE what you've seen so far or try a different approach (like reading a specific line range if available).`;
+                                errorMsg = `⚠️ Tool output truncated: ${e.message}. ` + diagnosticNudge;
+                                console.log(`     🛑 [WATCHDOG] Breaking infinite retry loop for aborted tool.`);
                             } else {
-                                diagnosticNudge += `You MUST use the 'diagnose_system_health' tool immediately to audit the logs and plan a fix before trying again.`;
+                                diagnosticNudge = `\n\n[SYSTEM_DIAGNOSIS] A tool error occurred (ID: ${errorId}). `;
+                                if (e.message.includes('SyntaxError')) {
+                                    diagnosticNudge += `Detected a SyntaxError. You MUST use 'diagnose_system_health' to build a fix plan, then use 'verify_syntax' or 'apply_patch'.`;
+                                } else if (e.message.toLowerCase().includes('timeout')) {
+                                    diagnosticNudge += `Detected a Timeout. You MUST use 'diagnose_system_health' to audit the process logs.`;
+                                } else {
+                                    diagnosticNudge += `You MUST use the 'diagnose_system_health' tool immediately to audit the logs and plan a fix before trying again.`;
+                                }
+                                errorMsg = `⚠️ Tool error (ID: ${errorId}): ${e.message}. ` + diagnosticNudge;
+                                console.log(`     🔄 [AUTO-HEAL] Engaging diagnostic loop for ${errorId}...`);
                             }
 
-                            const errorMsg = `⚠️ Tool error (ID: ${errorId}): ${e.message}. ` + diagnosticNudge;
-
-                            // Add to history to inform the LLM of the error and the required next steps
+                            // Add to history to inform the LLM
                             this.history.push({ role: 'assistant', content: assistantText });
                             this.history.push({ role: 'user', content: errorMsg });
 
-                            console.log(`     🔄 [AUTO-HEAL] Engaging diagnostic loop for ${errorId}...`);
+                            // Bypassing diagnostic chat recursion for simple aborts
+                            if (e.message.includes('aborted')) {
+                                this.processing = false;
+                                return assistantText + "\n\n(System: Operation aborted due to repetition. Summarizing partial results...)";
+                            }
 
-                            // 🚀 9B Escalation on Fast-Override Exception
+                            // 🚀 9B Escalation on Fast-Override Exception (Unified Port 18888)
                             if (chatOptions.fast) {
-                                const freeMem = os.freemem() / (1024 * 1024);
-                                if (freeMem > 6000) {
-                                    console.log(`     🚀 [RECOVERY] Tool "${toolCall.tool}" threw error. Retrying with heavy reasoning (${Math.round(freeMem)}MB free).`);
-                                    chatOptions.modelId = process.env.LLM_MODEL_HEAVY;
-                                    chatOptions.fast = false;
-                                } else {
-                                    console.log(`     ⚠️ [ESCALATION BLOCKED] Insufficient RAM (${Math.round(freeMem)}MB). Staying on 2B.`);
-                                }
+                                console.log(`     🚀 [RECOVERY] Retrying with full reasoning due to tool error.`);
+                                chatOptions.fast = false;
+                                chatOptions.modelId = process.env.LLM_MODEL;
                             }
 
                             const messages = this._prepareMessages(finalPrompt, chatOptions);
@@ -1858,11 +1876,11 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
             // Memory Optimization: Truncate very large tool results in history
             // Phase 60: Model-aware truncation — 9B gets tighter limits to stay within context budget
             // Memory Optimization: Truncate very large tool results in history
-            // Phase 60: Model-aware truncation — 9B gets tighter limits to stay within context budget
-            const maxMsgChars = is9B ? 12000 : 8000;
+            // Pillar 2: 4,000-character safety limit for M1 16GB
+            const maxMsgChars = is9B ? 4000 : 8000;
             this.history = this.history.map(item => {
-                if (item.content.length > maxMsgChars) {
-                    return { ...item, content: item.content.slice(0, maxMsgChars) + '... [Content truncated for memory]' };
+                if (item.content && item.content.length > maxMsgChars) {
+                    return { ...item, content: item.content.slice(0, maxMsgChars) + '... [Content truncated for memory safety]' };
                 }
                 return item;
             });
@@ -1875,11 +1893,17 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
             });
 
             // Background History Pruning (Phase 61: Lazy Execution)
-            // We emit the message FIRST, then summarize LATER to avoid lock contention.
+            // Pillar 1: Deadlock-Free State Resets (v4.1 Hardened)
             const runBackgroundSummarize = async () => {
-                await this.summarizeHistory(is9B);
-                this.processing = false;
-                this.abortController = null;
+                try {
+                    await this.summarizeHistory(is9B);
+                } catch (e) {
+                    console.error('🧠 [SUMMARIZER] Background task failed:', e.message);
+                } finally {
+                    this.processing = false;
+                    this.abortController = null;
+                    logDebug('[DEBUG] Agent state reset to IDLE.');
+                }
             };
 
             if (autoContinueFlag) {
@@ -2205,14 +2229,20 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
      * Get a specialized persona prompt for a team role
      */
     getTeamRolePrompt(roleName) {
-        // Single Source of Truth: Load persona from prompts/ directory only
+        // Primary: Load from prompts/ directory
         const promptPath = path.join(__dirname, '..', `prompts/team-${roleName}.md`);
-
         if (fs.existsSync(promptPath)) {
             return fs.readFileSync(promptPath, 'utf-8');
         }
 
-        console.warn(`⚠️ [AGENT] No persona file found for role: team-${roleName}. Expected at: prompts/team-${roleName}.md`);
+        // Fallback: Load from prompts/dynamic/ for synthesized experts
+        const dynamicPath = path.join(__dirname, '..', `prompts/dynamic/team-${roleName}.md`);
+        if (fs.existsSync(dynamicPath)) {
+            console.log(`🧠 [AGENT] Loaded dynamic expert persona: team-${roleName}`);
+            return fs.readFileSync(dynamicPath, 'utf-8');
+        }
+
+        console.warn(`⚠️ [AGENT] No persona file found for role: team-${roleName}.`);
         return "";
     }
 
@@ -2221,18 +2251,21 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
      * @param {boolean} is9B Whether we are using a larger model tier
      */
     async summarizeHistory(is9B) {
+        if (this.processing) return; // Pillar 3: Race condition lock. Never summarize mid-turn.
+        
         try {
-            const summarizeThreshold = is9B ? 8 : 15;
+            const summarizeThreshold = is9B ? 12 : 15; // Increased for 9B M1 stability
             if (this.history.length > summarizeThreshold) {
                 const goal = this.history.slice(0, 2);
-                const middle = this.history.slice(2, -5);
-                const recent = this.history.slice(-5);
+                const middle = this.history.slice(2, -6); // Pillar 1: 6-message safety buffer
+                const recent = this.history.slice(-6);
                 
                 if (middle.length > 2) {
                     this.emit('log', '🧠 [MEMORY] Compressing conversation history...');
                     console.log(`🧠 [SUMMARIZER] Compressing ${middle.length} turns of history...`);
-                    const middleText = middle.map(m => `[${m.role.toUpperCase()}]: ${m.content.substring(0, 150)}`).join('\n');
-                    const summary = await this.summarizeText(`Summarize the technical tasks, tool outputs, and decisions in these turns extremely briefly for a follow-up AI agent:\n${middleText}`);
+                    // Pillar 2: 2048-char visibility to fix "Toronto" hallucination
+                    const middleText = middle.map(m => `[${m.role.toUpperCase()}]: ${m.content.substring(0, 2048)}`).join('\n');
+                    const summary = await this.summarizeText(`Summarize the technical tasks, tool outputs, and decisions in these turns extremely briefly for a follow-up AI agent. You MUST capture the EXACT location, target, and intent requested by the user. Do not guess or generalize:\n${middleText}`);
                     
                     this.history = [
                         ...goal,
@@ -2255,14 +2288,14 @@ ${dynamicTools ? 'AVAILABLE TOOLS:\n' + dynamicTools : 'NO TOOLS LOADED.'}`;
         try {
             const { chat } = await import('./llm.js');
             const response = await chat([
-                { role: 'system', content: 'You are a technical summarization utility. Be extremely concise. Focus only on facts, outcomes, and current state.' },
+                { role: 'system', content: 'You are a technical summarization utility. Be extremely concise. Focus only on facts, outcomes, and current state. Never hallucinate locations or intents not explicitly stated in the source text.' },
                 { role: 'user', content: text }
             ], { 
                 jobName: 'background-summarizer',
                 priority: PRIORITY.LOW,
                 forceLocal: true, 
                 maxTokens: 300, 
-                signal: AbortSignal.timeout(60000) 
+                signal: AbortSignal.timeout(300000) // 5-minute timeout guard
             });
             return response.text;
         } catch (e) {

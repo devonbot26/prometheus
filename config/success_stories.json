@@ -1,0 +1,37 @@
+{
+  "version": "3.0",
+  "stories": [
+    {
+      "id": "weather_check",
+      "intent": "check_weather",
+      "description": "Fetching local weather information",
+      "keywords": ["weather", "temperature", "forecast"],
+      "tools": ["get_weather"],
+      "reactions": [
+        "1. Identify the city/location from the user message.",
+        "2. Call get_weather tool with the location.",
+        "3. Summarize the results (temp, conditions, etc.) concisely."
+      ],
+      "complexity": "low",
+      "strikes": 0
+    },
+    {
+      "id": "email_scan",
+      "intent": "check_emails",
+      "description": "Scanning for new or unread emails",
+      "keywords": ["email", "gmail", "inbox", "unread"],
+      "tools": ["gmail_scan", "gmail_list_threads"],
+      "complexity": "low",
+      "strikes": 0
+    },
+    {
+      "id": "file_list",
+      "intent": "summarize_files",
+      "description": "Listing files and basic directory structure",
+      "keywords": ["show files", "list directory", "what's in here"],
+      "tools": ["list_dir", "search_files"],
+      "complexity": "low",
+      "strikes": 0
+    }
+  ]
+}

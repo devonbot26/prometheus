@@ -10,7 +10,7 @@ import { StreamWatchdog } from './loop-watchdog.js';
 
 const PORT_FAST  = parseInt(process.env.LLAMA_PORT || '18888');
 
-function getLocalUrl(port) {
+function getLocalUrl() {
     return `http://127.0.0.1:${PORT_FAST}`;
 }
 
@@ -24,8 +24,7 @@ async function isPortAvailable(port) {
 }
 const GEMINI_MODEL = 'gemini-2.0-flash';
 
-const LOCAL_MODEL_DEFAULT = process.env.LLM_MODEL || 'Jackrong/MLX-Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-4bit';
-const LOCAL_MODEL_HEAVY  = process.env.LLM_MODEL_HEAVY || 'Jackrong/MLX-Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-4bit';
+const LOCAL_MODEL_DEFAULT = process.env.LLM_MODEL || 'Jackrong/MLX-Qwopus3.5-9B-v3-4bit';
 
 /**
  * Check if local LLM server is available
@@ -42,7 +41,7 @@ async function callLocal(messages, options = {}, targetModelOverride = null) {
     let attempt = 0;
 
     while (attempt < maxRetries) {
-        const targetModel = targetModelOverride || (options.deepThinking ? LOCAL_MODEL_HEAVY : LOCAL_MODEL_DEFAULT);
+        const targetModel = targetModelOverride || LOCAL_MODEL_DEFAULT;
         const isVL = targetModel.toLowerCase().includes('vlm');
         const urlPrefix = getLocalUrl();
         console.log(`[DEBUG] Calling ${urlPrefix}${isVL ? '/chat/completions' : '/v1/chat/completions'} (Attempt ${attempt + 1}/${maxRetries})`);
@@ -133,7 +132,7 @@ async function callLocal(messages, options = {}, targetModelOverride = null) {
  * Call Local Model (Streaming)
  */
 async function callLocalStreaming(messages, options = {}, targetModelOverride = null) {
-    const targetModel = targetModelOverride || (options.deepThinking ? LOCAL_MODEL_HEAVY : LOCAL_MODEL_DEFAULT);
+    const targetModel = targetModelOverride || LOCAL_MODEL_DEFAULT;
     const isVL = targetModel.toLowerCase().includes('vlm');
     const endpoint = isVL ? '/chat/completions' : '/v1/chat/completions';
     console.log(`[DEBUG] Selected endpoint: ${endpoint} for model: ${targetModel}`);

@@ -317,5 +317,30 @@ You can audit or manually override these learned preferences in `config/user_pri
 ## 🔗 Project Navigation
 - [[README]]: Project overview and features.
 - [[PROMETHEUS]]: Technical timeline and project history.
-- [[MIGRATION_GUIDE]]: Guide for transitioning from Clawdbot.
+- [[MIGRATION_GUIDE]]: Guide for transitioning from Clawbot.
 - [[GEMINI]]: Core system protocols and rules.
+
+---
+## 🚑 Emergency Recovery (The Physician Protocol)
+
+If Prometheus hangs, enters a loop, or becomes unresponsive due to hardware locks, you can activate the **External Physician**. This agent is designed for 100% independence from the core `Agent.js` system.
+
+### 1. The Native Dashboard "WAKE UP" Button
+If the main console is "stuck":
+1. Open the **Health** tab in the sidebar (Medical icon).
+2. Click the red **WAKE UP PHYSICIAN** button.
+3. Switch back to the **Console** tab to watch the diagnosis in real-time.
+
+### 2. Manual CLI Healing
+If the web server is completely dead and the Dashboard is disconnected:
+```bash
+npm run heal
+```
+
+### 3. Surgical Tools & Rollbacks
+The Physician is authorized to perform "Deep Surgery" on the Prometheus core:
+- **Atomic Backups**: Every file modified is backed up to `backups/physician/[timestamp]/`.
+- **Syntax Audits**: After any edit, the Physician runs `node --check` automatically.
+- **Auto-Rollback**: If the audit fails, she reverts to the backup immediately.
+- **Hardware Reset**: She can kill port 18888 and restart the MLX server if it is found to be "Brain Dead".
+- **Medical Records**: All recovery actions are logged to `logs/health_history.json`.

@@ -614,6 +614,33 @@
             color: var(--blue);
             font-weight: bold;
         }
+        .tier-pill {
+            font-size: 0.7rem;
+            font-weight: bold;
+            padding: 2px 8px;
+            border-radius: 4px;
+            border: 1px solid #30363d;
+            background: rgba(0,0,0,0.2);
+            transition: all 0.3s;
+        }
+        .tier-reasoner { color: var(--blue); border-color: var(--blue); }
+        .tier-worker { color: var(--yellow); border-color: var(--yellow); }
+        .tier-offline { opacity: 0.4; filter: grayscale(1); }
+        .tier-active { animation: pulse 1s infinite; background: rgba(255,255,255,0.05); }
+
+        .tier-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.65rem;
+            font-weight: bold;
+            text-transform: uppercase;
+            padding: 1px 6px;
+            border-radius: 4px;
+            margin-bottom: 5px;
+        }
+        .badge-reasoner { background: rgba(88, 166, 255, 0.1); color: var(--blue); }
+        .badge-worker { background: rgba(227, 179, 65, 0.1); color: var(--yellow); }
     </style>
 </head>
 
@@ -630,10 +657,10 @@
             </div>
         </div>
         <div id="quota-monitor" style="display: flex; align-items: center; gap: 15px; font-size: 0.75rem;">
-            <div id="active-model"
-                style="color: var(--blue); font-weight: bold; background: rgba(56, 139, 253, 0.1); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--blue);">
-                --</div>
-            <div id="refresh-timer" title="Time until quota reset">--:--:--</div>
+            <div id="tier-monitor" style="display: flex; align-items: center; gap: 10px;">
+                <div id="status-reasoner" class="tier-pill tier-reasoner" title="9B Reasoner Status">🏛️ R: --</div>
+                <div id="status-worker" class="tier-pill tier-worker" title="2B Worker Status">🐝 W: --</div>
+            </div>
             <div id="memory-indicator"
                 style="display: flex; align-items: center; gap: 5px; background: rgba(0,0,0,0.2); padding: 2px 8px; border-radius: 4px; border: 1px solid #30363d;">
                 <span style="color: #8b949e; font-weight: bold; font-size: 0.7rem;">MEM:</span>
@@ -814,11 +841,14 @@
             statusDiv.style.color = 'var(--yellow)';
         });
 
-        socket.on('content_stream', (chunk) => {
+        socket.on('content_stream', (data) => {
+            const chunk = typeof data === 'object' ? data.chunk : data;
+            const tier = typeof data === 'object' ? data.tier : 'reasoner';
+
             let lastMsg = messagesDiv.lastElementChild;
             if (!lastMsg || !lastMsg.classList.contains('assistant') || lastMsg._isFinal) {
                 // Start a new assistant message for the stream
-                addMessage('assistant', chunk);
+                addMessage('assistant', chunk, null, null, null, tier);
             } else {
                 // Update existing stream
                 lastMsg._textContent = (lastMsg._textContent || '') + chunk;
@@ -988,11 +1018,19 @@
             }
         }
 
-        socket.on('status', (msg) => {
+        socket.on('status', (data) => {
+            const msg = typeof data === 'object' ? data.text : data;
+            const tier = typeof data === 'object' ? data.tier : 'system';
+
             statusDiv.textContent = msg;
             const btn = document.getElementById('sendBtn');
 
-            if (msg.startsWith('Thinking') || msg.startsWith('Queued')) {
+            // Update Tier Active Visuals
+            document.querySelectorAll('.tier-pill').forEach(p => p.classList.remove('tier-active'));
+            if (tier === 'reasoner') document.getElementById('status-reasoner').classList.add('tier-active');
+            if (tier === 'worker') document.getElementById('status-worker').classList.add('tier-active');
+
+            if (msg.startsWith('Thinking') || msg.startsWith('Queued') || msg.startsWith('Executing')) {
                 statusDiv.style.color = 'var(--yellow)';
                 if (btn) {
                     btn.textContent = 'Stop';
@@ -1057,9 +1095,31 @@
             }
         });
 
-        socket.on('model_info', (model) => {
-            document.getElementById('active-model').textContent = model;
-            log(`🧠 Active Model: ${model}`);
+        socket.on('model_info', (data) => {
+            const model = typeof data === 'object' ? data.model : data;
+            const tier = typeof data === 'object' ? data.tier : 'reasoner';
+            
+            const el = document.getElementById(`status-${tier}`);
+            if (el) {
+                const icon = tier === 'worker' ? '🐝' : '🏛️';
+                const label = tier === 'worker' ? 'W' : 'R';
+                const modelName = model.split('/').pop();
+                el.textContent = `${icon} ${label}: ${modelName}`;
+            }
+            log(`🧠 Active Model Update [${tier}]: ${model}`);
+        });
+
+        socket.on('mlx_status_v3', (data) => {
+            const el = document.getElementById(`status-${data.tier}`);
+            if (el) {
+                if (data.state === 'online') el.classList.remove('tier-offline');
+                else el.classList.add('tier-offline');
+                
+                const icon = data.tier === 'worker' ? '🐝' : '🏛️';
+                const label = data.tier === 'worker' ? 'W' : 'R';
+                const modelName = data.model ? data.model.split('/').pop() : '--';
+                el.textContent = `${icon} ${label}: ${modelName}`;
+            }
         });
 
         socket.on('history', (history) => {
@@ -1114,14 +1174,15 @@
             if (e.key === 'Enter') send();
         });
 
-        function addMessage(role, text, raw = null, strips = [], performance = null) {
+        function addMessage(role, text, raw = null, strips = [], performance = null, tier = 'reasoner') {
             // Smoothing Logic: If the last message is an assistant stream, update it instead of appending
             const lastMsg = messagesDiv.lastElementChild;
             if (role === 'assistant' && lastMsg && lastMsg.classList.contains('assistant') && !lastMsg._isFinal) {
                 // If it's a final message (has performance) or if we are just updating a stream, replace content
                 if (performance) lastMsg._isFinal = true;
                 lastMsg._textContent = text;
-                renderMessageInto(lastMsg, text, raw, strips, performance);
+                lastMsg._tier = tier;
+                renderMessageInto(lastMsg, text, raw, strips, performance, tier);
                 messagesDiv.scrollTop = messagesDiv.scrollHeight;
                 return;
             }
@@ -1129,15 +1190,24 @@
             const div = document.createElement('div');
             div.className = `msg ${role}`;
             div._textContent = text;
+            div._tier = tier;
             if (role === 'assistant' && performance) div._isFinal = true;
-            renderMessageInto(div, text, raw, strips, performance);
+            renderMessageInto(div, text, raw, strips, performance, tier);
             messagesDiv.appendChild(div);
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
         }
 
-        function renderMessageInto(div, text, raw, strips, performance) {
+        function renderMessageInto(div, text, raw, strips, performance, tier = 'reasoner') {
             div.innerHTML = '';
             
+            // Tier Badge
+            if (div.classList.contains('assistant')) {
+                const badge = document.createElement('div');
+                badge.className = `tier-badge badge-${tier}`;
+                badge.innerHTML = tier === 'worker' ? '🐝 2B Worker (Action)' : '🏛️ 9B Reasoner (Think)';
+                div.appendChild(badge);
+            }
+
             // Handle special prompt-draft blocks first (custom Prometheus feature)
             if (text.includes('```prompt-draft')) {
                 const parts = text.split('```');

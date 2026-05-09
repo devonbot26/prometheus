@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "facts": [
+    {
+      "id": "identity",
+      "fact": "Prometheus is a tiered model orchestrator using dual MLX servers (9B + 2B).",
+      "source": "Architecture Design V3"
+    },
+    {
+      "id": "hardware",
+      "fact": "The system is running on a 16GB Mac Mini M1.",
+      "source": "System Specs"
+    }
+  ]
+}

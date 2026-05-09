@@ -9,7 +9,7 @@
             "parameters": {
                 "location": {
                     "type": "string",
-                    "description": "City name (e.g., 'Toronto')",
+                    "description": "City name (e.g., 'Charlottetown')",
                     "required": false
                 }
             }

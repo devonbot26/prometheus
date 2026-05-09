@@ -145,6 +145,32 @@
             "path": "index.js",
             "description": "Resumes the current mission from the next pending step. Use this to start an imported flow or to resume one that was interrupted.",
             "parameters": {}
+        },
+        "synthesize_expert": {
+            "path": "index.js",
+            "description": "Creates a temporary specialist agent for a niche domain. The expert inherits tools from a base template (coder, researcher, qa). Use this ONLY when existing team roles cannot handle the task. After calling this, use handoff_to with the returned role_name.",
+            "parameters": {
+                "domain": {
+                    "type": "string",
+                    "description": "The niche subject area (e.g., 'mainframe-security', 'cobol-analysis', 'patent-law').",
+                    "required": true
+                },
+                "base_template": {
+                    "type": "string",
+                    "description": "Which existing role's tools to inherit: 'coder' (terminal, self-coder), 'researcher' (web-search, web-scraper), or 'qa' (terminal only).",
+                    "required": true
+                },
+                "task_description": {
+                    "type": "string",
+                    "description": "A one-sentence description of what the expert must do.",
+                    "required": true
+                },
+                "constraints": {
+                    "type": "string",
+                    "description": "What the expert must NOT do (e.g., 'Do not rewrite entire files').",
+                    "required": false
+                }
+            }
         }
     }
 }

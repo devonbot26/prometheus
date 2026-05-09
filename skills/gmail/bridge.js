@@ -354,6 +354,9 @@ export async function gmail_get_auth_url() {
  */
 export async function gmail_set_auth_code(args) {
     const { code } = args;
+    // Sanitize code: If the user pasted a full URL or fragment (e.g. including &scope=), strip it.
+    const cleanCode = code.split('&')[0].trim();
+    
     try {
         const content = await fs.readFile(CREDENTIALS_PATH);
         const keys = JSON.parse(content);
@@ -361,7 +364,7 @@ export async function gmail_set_auth_code(args) {
         const { client_secret, client_id, redirect_uris } = key;
         const oAuth2Client = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0]);
 
-        const { tokens } = await oAuth2Client.getToken(code);
+        const { tokens } = await oAuth2Client.getToken(cleanCode);
         await fs.writeFile(TOKEN_PATH, JSON.stringify(tokens));
         
         return { success: true, message: "Token saved successfully. Gmail skill is now ready to use." };

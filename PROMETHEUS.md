@@ -1,5 +1,56 @@
 This file tracks the autonomous progress and milestones of the Prometheus AI Assistant. See also: [[README]] | [[MANUAL]] | [[ROLES]]
 
+### 2026-04-05 10:30:00 PM
+- **System Recovery (v5.3.2)**: Implemented the **External Physician Protocol**.
+    - **Total Independence**: Created a standalone recovery agent (`scripts/physician.mjs`) that does not import the Prometheus core, ensuring it can run during a total system crash.
+    - **Native UI Integration**: Added a "Health" tab to the SwiftUI Dashboard with a **Manual WAKE UP** button.
+    - **Atomic Surgery**: Implemented mandatory backups and `node --check` syntax audits for all Physician-led repairs.
+    - **Hardware Authority**: Authorized the Physician to perform "Hard Hardware Resets" (Killing ports and re-launching MLX via `start_llama.sh`).
+
+## Physician Recovery Lessons (v5.3.2)
+- **Incident 2026-04-05-01**: Prometheus entered a "Syntax Loop" using invalid terminal parentheses `(ERR-010.json)`. 
+    - **Diagnosis**: 9B model hallucinations in non-escaped shell commands caused a mid-stream abort.
+    - **Fix**: Physician performed a baseline reset and cleared the stalled task state.
+    - **Lesson**: High-priority tasks need explicit shell-escaping directives in the system prompt.
+- **Incident 2026-04-05-02**: Physician returned an empty diagnosis.
+    - **Diagnosis**: MLX server (Port 18888) was dead during the diagnostic turn.
+    - **Fix**: Upgraded Physician to **v5.3.2** with explicit "Hardware Reset" reporting and fallback text.
+    - **Lesson**: A "Silent Brain" must always be treated as a "Crashed Brain."
+
+## System Stability: Lessons Learned (v4.1 Additions)
+
+### 2026-04-05 08:45:00 PM
+- **System Hardening (v4.1)**: Implemented **Hardened Persistence** for state safety.
+    - **Deadlock Resolution**: Fixed the "Lethal Deadlock" where a failed background summarizer would leave the agent in a permanent "Busy" state. 
+    - **Guaranteed Resets**: Wrapped all background history mutations in `try...finally` blocks to ensure the agent always returns to a ready/idle state.
+    - **VRAM Safety (4k Limit)**: Reduced the truncation limit for 9B tool results from 12,000 to **4,000 characters**. This prevents context-overflow crashes on 16GB RAM machines during massive `curl` or `terminal_run` outputs.
+    - **Hard Watchdogs**: Implemented a 5-minute hard timeout for all background summarization tasks to prevent infinite hangs.
+
+## System Stability: Lessons Learned (v4.1 Additions)
+- **The Sequential Lock Deadlock**: Implementing a sequential lock (`if (processing) return`) without a `finally` block for background tasks creates a "Silent Hang" risk. If the background task (summarizer) throws an error, the agent is locked in a "Busy" state forever.
+    - *Fix*: Always use `finally` to reset the processing flag for any background task that holds a system lock.
+- **Context-Overflow "Brownout"**: Large tool outputs (12k+ chars) on a 16k context window leave zero room for reasoning, causing the model to "stop" without a response or crash the MLX server.
+    - *Fix*: Limit single-message tool outputs to 4,000 characters (1k tokens) to preserve reasoning bandwidth on memory-constrained hardware.
+- **Background Error Masking**: Errors in `async` background closures are often swallowed, leading to "Silent Failures" that are hard to diagnose without explicit `console.error` blocks.
+
+
+### 2026-04-05 06:45:00 PM
+- **System Hardening (v4.0)**: Implemented **Fidelity Memory** for M1 Monolithic architecture.
+    - **Hallucination Pruning**: Fixed the "Toronto Location" bug by increasing summarizer visibility from 150 to **2,048 characters**. 
+    - **The 6-Message Safety Buffer**: Implemented a raw history buffer that protects the most recent 6 messages from compression, ensuring tool-loop continuity.
+    - **Sequential Summarization**: Added an autonomous lock that prevents memory mutations while an agent is in an active reasoning/tool turn.
+    - **Context Migration**: Implemented "Summary Migration" logic to ensure long-term historical context is never "sliced out" of the 16k context window.
+    - **UI Stabilization**: Hardened the Native Dashboard by locking the Model Picker to the 9B monolithic baseline, preventing desync.
+
+## System Stability: Lessons Learned (v4.0 Additions)
+- **The Truncation Paradox**: Using a tiny substring (150 chars) for background summarization forces the model to "guess" missing details (like locations), leading to persistent hallucinations.
+    - *Fix*: Baseline context visibility for summarization must be at least 2,048 characters on 16GB+ hardware.
+- **Race Condition Amnesia**: Mutating history via background processes during a multi-turn tool loop causes the model to "forget" its last result, triggering redundant re-execution.
+    - *Fix*: Implement an `if (this.processing) return;` guard on all memory-mutating background jobs.
+- **Double-Pruning Errors**: Slicing history based on token count can accidentally remove the "Historical Summary" message itself.
+    - *Fix*: Context preparation logic must explicitly search for and re-inject the Summary Message if it is missing from the active slice.
+
+
 ### 2026-04-01 11:30:00 AM
 - **Major Architecture Shift**: Implemented the **Prioritized Model Controller (Scheduler)**.
     - **Zero-Jitter Hardware Access**: Replaced the filesystem "Spin-Lock" with an event-driven FIFO queue. Reduced polling latency from 1000ms to 100ms.

@@ -1,0 +1,27 @@
+{
+  "name": "devon_lifecycle",
+  "description": "Manage the AI lifecycle by promoting successful task sequences (Action-Reaction) to the Worker model or demoting failures.",
+  "version": "1.0.0",
+  "tools": {
+    "promote_to_worker": {
+      "function": "promote_to_worker",
+      "description": "Promote a successful task to the 2B Worker registry for future execution.",
+      "params": {
+        "id": { "type": "string" },
+        "intent": { "type": "string" },
+        "description": { "type": "string" },
+        "keywords": { "type": "array", "items": { "type": "string" } },
+        "reactions": { "type": "array", "items": { "type": "string" } },
+        "complexity": { "type": "string", "enum": ["low", "medium"] }
+      }
+    },
+    "demote_from_worker": {
+      "function": "demote_from_worker",
+      "description": "Demote a failed task from the 2B Worker registry or record a strike.",
+      "params": {
+        "storyId": { "type": "string" },
+        "reason": { "type": "string" }
+      }
+    }
+  }
+}

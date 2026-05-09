@@ -154,6 +154,28 @@ initCronJobs(agent, (output) => {
     io.emit('agent_output', { text: output });
 });
 
+// --- Physician Recovery API ---
+io.on('connection', (socket) => {
+    socket.on('trigger_physician', () => {
+        console.log('🚑 [WEB] Manual Physician Wake-up Triggered...');
+        import('child_process').then(({ spawn }) => {
+            const physician = spawn('node', ['scripts/physician.mjs']);
+            
+            physician.stdout.on('data', (data) => {
+                io.emit('agent_output', { text: data.toString() });
+            });
+
+            physician.stderr.on('data', (data) => {
+                io.emit('agent_output', { text: `⚠️ [PHYSICIAN_ERROR] ${data.toString()}` });
+            });
+
+            physician.on('close', (code) => {
+                io.emit('agent_output', { text: `✅ [PHYSICIAN] Surgery complete (Code: ${code})` });
+            });
+        });
+    });
+});
+
 // --- MCP Hub API ---
 app.get('/api/mcp/config', (req, res) => {
     res.json(mcpManager.getServerStatus());

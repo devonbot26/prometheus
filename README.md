@@ -1,17 +1,19 @@
-# 🔥 Project Prometheus — Devon v2.0
+# 🔥 Project Prometheus — True Monolith v5.4.2 (Dynamic SME Synthesis)
 
 Project Prometheus is a custom AI assistant framework designed for maximum user control, privacy, and skill extensibility. It operates via "skill-first" architecture powered by strictly local LLMs (e.g., Llama.cpp, vLLM with Qwen 2.5 7B).
 
 ## 🚀 Key Features
 
+*   **Dynamic SME Synthesis (v5.4.2)**: Autonomous generation of transient, mission-specific agent identities (SMEs) with inherited toolsets and strict architectural safeguards.
 *   **Privacy-First Intelligence**: Operates fully on local hardware. No API keys or cloud dependencies required for core logic.
+*   **Autonomous Self-Healing (v5.3.2)**: Featuring the **External Physician**, an independent recovery agent that handles silent hangs, clears hardware locks, and repairs syntax errors without core dependencies.
 *   **Dynamic Skill System**: Droppable folder-based skill system that allows for seamless persona switching (e.g., Librarian, Sys-Admin, Lead Researcher).
 *   **Autonomous Chaining**: Agents like the Lead Researcher can execute multi-step plans (e.g., scraping GitHub, analyzing Reddit sentiment, outputting Markdown) without manual intervention.
 *   **Integrated Memory**: Stores long-term context in a local SQLite/Vector database and directly interfaces with Obsidian Notebooks for human-readable tracking.
 *   **High-Performance Streaming**: Near-zero TTFT using NDJSON streams for local MLX models, matching OpenCode performance.
-*  - **Natively Integrated**: Deep macOS workspace integration with dynamic project pathing.
-- **Dynamic Instances**: Configurable server address via `PROMETHEUS_URL` for custom deployments.
-- **Zero-Overhead Reasoning**: Optimized model loading using Apple Silicon's unified memory.
+*   **Emergency Recovery**: Run `npm run heal` to wake up the Physician Agent for out-of-band diagnostics and repair.
+*   **Natively Integrated**: Deep macOS workspace integration with dynamic project pathing.
+*   **Zero-Overhead Reasoning**: Optimized model loading using Apple Silicon's unified memory.
 *   **OpenCode UI**: Premium vertically-bordered CLI with real-time dimmed reasoning blocks.
 
 ## 🤖 16 Specialized Skills

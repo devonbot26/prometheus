@@ -1,4 +1,6 @@
 import { spawn } from 'child_process';
+import path from 'path';
+import fs from 'fs';
 import { logDebug } from '../../core/logger.js';
 
 /**
@@ -133,7 +135,6 @@ export function terminal_run(args, options = {}) {
             if (outputSize > 8000) {
                 const bufferId = `buffer_${Date.now()}`;
                 const bufferDir = path.join(process.env.PROJECT_ROOT || process.cwd(), 'logs', 'shadow_buffers');
-                const fs = await import('fs');
                 if (!fs.existsSync(bufferDir)) fs.mkdirSync(bufferDir, { recursive: true });
                 
                 const bufferPath = path.join(bufferDir, `${bufferId}.txt`);
@@ -169,8 +170,6 @@ export function terminal_run(args, options = {}) {
 export async function peek_buffer({ buffer_id, start_line, lines }) {
     return new Promise(async (resolve) => {
         try {
-            const fs = await import('fs');
-            const path = await import('path');
             const bufferPath = path.join(process.env.PROJECT_ROOT || process.cwd(), 'logs', 'shadow_buffers', `${buffer_id}.txt`);
             
             if (!fs.existsSync(bufferPath)) {
